@@ -3,8 +3,8 @@
 #PBS -N spinn_encoded_300_05
 #PBS -j oe
 #PBS -M apd283@nyu.edu
-#PBS -l mem=8GB
-#PBS -l walltime=16:00:00
+#PBS -l mem=6GB
+#PBS -l walltime=24:00:00
 
 module load cuda/7.5.18
 module load cudnn/7.0v4.0

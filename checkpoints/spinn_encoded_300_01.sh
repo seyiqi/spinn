@@ -1,16 +1,16 @@
 #!/bin/bash
-#PBS -l nodes=1:ppn=1:gpus=1
-#PBS -N spinn_encoded_01
+#PBS -l nodes=1:ppn=1:gpus=1:titan
+#PBS -N spinn_encoded_300_01
 #PBS -j oe
 #PBS -M apd283@nyu.edu
 #PBS -l mem=6GB
-#PBS -l walltime=16:00:00
+#PBS -l walltime=24:00:00
 
 module load cuda/7.5.18
 module load cudnn/7.0v4.0
 module load numpy/intel/1.10.1
 
-MODEL_NAME="spinn_encoded_01"
+MODEL_NAME="spinn_encoded_300_01"
 
 cd spinn
 . .venv-hpc/bin/activate
@@ -37,6 +37,7 @@ export MODEL_FLAGS=" \
 --training_data_path ../snli_1.0/snli_1.0_train.jsonl \
 --use_tracking_lstm  \
 --use_encoded_embeddings \
+--enc_embedding_dim 300 \
 --word_embedding_dim 300 \
 \
  --semantic_classifier_keep_rate 0.84500229192 \

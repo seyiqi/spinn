@@ -1,16 +1,16 @@
 #!/bin/bash
-#PBS -l nodes=1:ppn=1:gpus=1
-#PBS -N spinn_encoded_01
+#PBS -l nodes=1:ppn=1:gpus=1:k80
+#PBS -N spinn_encoded_300_08
 #PBS -j oe
 #PBS -M apd283@nyu.edu
 #PBS -l mem=6GB
-#PBS -l walltime=16:00:00
+#PBS -l walltime=24:00:00
 
 module load cuda/7.5.18
 module load cudnn/7.0v4.0
 module load numpy/intel/1.10.1
 
-MODEL_NAME="spinn_encoded_01"
+MODEL_NAME="spinn_encoded_300_08"
 
 cd spinn
 . .venv-hpc/bin/activate
@@ -37,15 +37,17 @@ export MODEL_FLAGS=" \
 --training_data_path ../snli_1.0/snli_1.0_train.jsonl \
 --use_tracking_lstm  \
 --use_encoded_embeddings \
+--enc_embedding_dim 300 \
 --word_embedding_dim 300 \
 \
- --semantic_classifier_keep_rate 0.84500229192 \
- --tracking_lstm_hidden_dim 72 \
- --num_sentence_pair_combination_layers 1 \
- --embedding_keep_rate 0.88083350076 \
- --learning_rate 0.00232294659104 \
- --l2_lambda 2.29166686124e-06 \
- --transition_cost_scale 0.916360748835 \
+ --semantic_classifier_keep_rate 0.900747315459 \
+ --tracking_lstm_hidden_dim 91 \
+ --num_sentence_pair_combination_layers 2 \
+ --embedding_keep_rate 0.945263800948 \
+ --learning_rate 0.000277279135565 \
+ --l2_lambda 1.57668449332e-05 \
+ --scheduled_sampling_exponent_base 0.999968676351 \
+ --transition_cost_scale 1.41775594331 \
 "
 
 echo "THEANO_FLAGS: $THEANO_FLAGS"

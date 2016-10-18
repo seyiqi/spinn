@@ -1,16 +1,16 @@
 #!/bin/bash
 #PBS -l nodes=1:ppn=1:gpus=1
-#PBS -N spinn_encoded_01
+#PBS -N spinn_encoded_x_17
 #PBS -j oe
 #PBS -M apd283@nyu.edu
 #PBS -l mem=6GB
-#PBS -l walltime=16:00:00
+#PBS -l walltime=24:00:00
 
 module load cuda/7.5.18
 module load cudnn/7.0v4.0
 module load numpy/intel/1.10.1
 
-MODEL_NAME="spinn_encoded_01"
+MODEL_NAME="spinn_encoded_x_17"
 
 cd spinn
 . .venv-hpc/bin/activate
@@ -39,13 +39,16 @@ export MODEL_FLAGS=" \
 --use_encoded_embeddings \
 --word_embedding_dim 300 \
 \
- --semantic_classifier_keep_rate 0.84500229192 \
- --tracking_lstm_hidden_dim 72 \
- --num_sentence_pair_combination_layers 1 \
- --embedding_keep_rate 0.88083350076 \
- --learning_rate 0.00232294659104 \
- --l2_lambda 2.29166686124e-06 \
- --transition_cost_scale 0.916360748835 \
+ --eval_interval_steps 1000 \
+ --enc_embedding_dim 128 \
+ --semantic_classifier_keep_rate 0.94127451353 \
+ --tracking_lstm_hidden_dim 38 \
+ --num_sentence_pair_combination_layers 2 \
+ --embedding_keep_rate 0.838506463088 \
+ --learning_rate 0.00245529274498 \
+ --l2_lambda 2.95762984117e-06 \
+ --scheduled_sampling_exponent_base 0.999989847653 \
+ --transition_cost_scale 3.96660759892 \
 "
 
 echo "THEANO_FLAGS: $THEANO_FLAGS"
