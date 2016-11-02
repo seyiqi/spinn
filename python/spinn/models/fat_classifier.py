@@ -31,6 +31,7 @@ import numpy as np
 
 from spinn import afs_safe_logger
 from spinn import util
+from spinn.util.data import SimpleProgressBar
 from spinn.data.boolean import load_boolean_data
 from spinn.data.sst import load_sst_data
 from spinn.data.snli import load_snli_data
@@ -396,7 +397,9 @@ def evaluate(eval_fn, eval_set, logger, step):
     acc_accum = 0.0
     action_acc_accum = 0.0
     eval_batches = 0.0
-    for (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in eval_set[1]:
+    eval_progress = SimpleProgressBar(msg="eval")
+    total_steps = len(eval_set[1])
+    for eval_step, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in enumerate(eval_set[1]):
         acc_value, action_acc_value = eval_fn(
             eval_X_batch, eval_transitions_batch,
             eval_y_batch, eval_num_transitions_batch, 0.0,  # Eval mode: Don't apply dropout.
@@ -407,6 +410,8 @@ def evaluate(eval_fn, eval_set, logger, step):
         acc_accum += acc_value
         action_acc_accum += action_acc_value
         eval_batches += 1.0
+        eval_progress.step(eval_step, total_steps)
+    eval_progress.finish()
     logger.Log("Step: %i\tEval acc: %f\t %f\t%s" %
               (step, acc_accum / eval_batches, action_acc_accum / eval_batches, eval_set[0]))
     return acc_accum / eval_batches
@@ -720,14 +725,17 @@ def run(only_forward=False):
         logger.Log("Training.")
 
         # Main training loop.
+        progress = SimpleProgressBar(msg="train")
         for step in range(step, FLAGS.training_steps):
-            if step % FLAGS.eval_interval_steps == 0:
+            if step % FLAGS.eval_interval_steps == 0 and (step == 0 and FLAGS.eval_initial or step > 0):
+                progress.clear()
                 for index, eval_set in enumerate(eval_iterators):
                     acc = evaluate(eval_fn, eval_set, logger, step)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < 0.99 * best_dev_error and step > 1000:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
                         vs.save_checkpoint(checkpoint_path + "_best", extra_vars=[step, best_dev_error])
+                progress.reset()
 
             X_batch, transitions_batch, y_batch, num_transitions_batch = training_data_iter.next()
             learning_rate = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
@@ -735,7 +743,9 @@ def run(only_forward=False):
                             learning_rate, 1.0, 1.0, np.exp(step*np.log(FLAGS.scheduled_sampling_exponent_base)))
             total_cost_val, xent_cost_val, transition_cost_val, action_acc_val, l2_cost_val, acc_val = ret
 
+            progress.step(max(0, step-1) % FLAGS.statistics_interval_steps + 1, FLAGS.statistics_interval_steps)
             if step % FLAGS.statistics_interval_steps == 0:
+                progress.finish()
                 logger.Log(
                     "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
                     % (step, acc_val, action_acc_val, total_cost_val, xent_cost_val, transition_cost_val,
@@ -835,6 +845,7 @@ if __name__ == '__main__':
     # Display settings.
     gflags.DEFINE_integer("statistics_interval_steps", 100, "Print training set results at this interval.")
     gflags.DEFINE_integer("eval_interval_steps", 100, "Evaluate at this interval.")
+    gflags.DEFINE_boolean("eval_initial", False, "Run eval before running train.")
 
     gflags.DEFINE_integer("ckpt_interval_steps", 5000, "Update the checkpoint on disk at this interval.")
     gflags.DEFINE_boolean("ckpt_on_best_dev_error", True, "If error on the first eval set (the dev set) is "

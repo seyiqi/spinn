@@ -2,6 +2,8 @@
 
 import random
 import itertools
+import time
+import sys
 
 import numpy as np
 import theano
@@ -283,3 +285,33 @@ def TransitionsToParse(transitions, words):
         return stack.pop()
     else:
         return " ".join(words)
+
+class SimpleProgressBar(object):
+    """ Simple Progress Bar and Timing Snippet
+    """
+
+    def __init__(self, msg=">", bar_length=80):
+        super(SimpleProgressBar, self).__init__()
+        self.begin = time.time()
+        self.bar_length = bar_length
+        self.msg = msg
+
+    def step(self, i, total):
+        sys.stdout.write('\r')
+        pct = (i / float(total)) * 100
+        ii = i * self.bar_length / total
+        fmt = "%s [%-{}s] %d%% %ds / %ds".format(self.bar_length)
+        total_time = time.time()-self.begin
+        expected = total_time / ((i+1e-03) / float(total))
+        sys.stdout.write(fmt % (self.msg, '='*ii, pct, total_time, expected))
+        sys.stdout.flush()
+
+    def reset(self, begin=None):
+        self.begin = time.time()
+
+    def clear(self):
+        sys.stdout.write('\n')
+
+    def finish(self):
+        self.reset()
+        self.clear()
