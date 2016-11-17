@@ -142,6 +142,10 @@ class SentencePairTrainer(BaseSentencePairTrainer):
         # self.optimizer.add_hook(chainer.optimizer.WeightDecay(0.00003))
 
 
+class SentenceTrainer(SentencePairTrainer):
+    pass
+
+
 class TreeLSTMChain(Chain):
     def __init__(self, hidden_dim, tracking_lstm_hidden_dim, use_external=False, prefix="TreeLSTMChain", gpu=-1):
         super(TreeLSTMChain, self).__init__(
@@ -561,5 +565,98 @@ class SentencePairModel(Chain):
         # Calculate Loss & Accuracy.
         accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+
+        if hasattr(transition_acc, 'data'):
+          transition_acc = transition_acc.data
+
+        return y, accum_loss, self.accuracy.data, transition_acc
+
+class SentenceModel(Chain):
+    def __init__(self, model_dim, word_embedding_dim,
+                 seq_length, initial_embeddings, num_classes, mlp_dim,
+                 keep_rate,
+                 gpu=-1,
+                 tracking_lstm_hidden_dim=4,
+                 transition_weight=None,
+                 use_tracking_lstm=True,
+                 use_shift_composition=True,
+                 make_logits=False,
+                 use_history=False,
+                 save_stack=False,
+                 **kwargs
+                ):
+        super(SentenceModel, self).__init__(
+            projection=L.Linear(word_embedding_dim, model_dim, nobias=True),
+            x2h=SPINN(model_dim,
+                tracking_lstm_hidden_dim=tracking_lstm_hidden_dim,
+                use_tracking_lstm=use_tracking_lstm,
+                use_shift_composition=use_shift_composition,
+                make_logits=make_logits,
+                gpu=gpu, keep_rate=keep_rate),
+            l0=L.Linear(model_dim, mlp_dim),
+            l1=L.Linear(mlp_dim, mlp_dim),
+            l2=L.Linear(mlp_dim, num_classes)
+        )
+
+        self.classifier = CrossEntropyClassifier(gpu)
+        self.__gpu = gpu
+        self.__mod = cuda.cupy if gpu >= 0 else np
+        self.accFun = accuracy.accuracy
+        self.initial_embeddings = initial_embeddings
+        self.keep_rate = keep_rate
+        self.word_embedding_dim = word_embedding_dim
+        self.model_dim = model_dim
+
+    def __call__(self, sentences, transitions, y_batch=None, train=True):
+        ratio = 1 - self.keep_rate
+
+        batch_size = sentences.shape[0]
+
+        # Get Embeddings
+        sentences = self.initial_embeddings.take(sentences, axis=0
+            ).astype(np.float32)
+
+        x = sentences
+
+        if self.__gpu >= 0:
+            x = cuda.to_gpu(x)
+
+        x = Variable(x, volatile=not train)
+
+        batch_size, seq_length = x.shape[0], x.shape[1]
+
+        x = F.dropout(x, ratio=ratio, train=train)
+
+        # ######
+
+        # Pass embeddings through projection layer, so that they match
+        # the dimensions in the output of the compose/reduce function.
+        x = F.reshape(x, (batch_size * seq_length, self.word_embedding_dim))
+        x = self.projection(x)
+        x = F.reshape(x, (batch_size, seq_length, self.model_dim))
+
+        # Extract Transitions
+        t = transitions
+
+        # Pass through Sentence Encoders.
+        self.x2h.reset_state(batch_size, train)
+        h, transition_acc = self.x2h(x, t, train=train)
+
+        # ######
+
+        # Pass through MLP Classifier.
+        h = self.l0(h)
+        h = F.relu(h)
+        h = self.l1(h)
+        h = F.relu(h)
+        h = self.l2(h)
+        y = h
+
+        # Calculate Loss & Accuracy.
+        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+        self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+
+        if hasattr(transition_acc, 'data'):
+          transition_acc = transition_acc.data
 
         return y, accum_loss, self.accuracy.data, transition_acc
