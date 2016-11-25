@@ -475,7 +475,7 @@ class SPINN(Chain):
 
 
 class SentencePairModel(Chain):
-    def __init__(self, model_dim, word_embedding_dim,
+    def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
                  keep_rate,
                  gpu=-1,
@@ -508,6 +508,10 @@ class SentencePairModel(Chain):
         self.keep_rate = keep_rate
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
+
+        if self.initial_embeddings is None:
+            raise Exception("Not implemented.")
+            # self.add_link('embed', L.EmbedID(vocab_size, word_embedding_dim))
 
     def __call__(self, sentences, transitions, y_batch=None, train=True):
         ratio = 1 - self.keep_rate
@@ -572,7 +576,7 @@ class SentencePairModel(Chain):
         return y, accum_loss, self.accuracy.data, transition_acc
 
 class SentenceModel(Chain):
-    def __init__(self, model_dim, word_embedding_dim,
+    def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
                  keep_rate,
                  gpu=-1,
@@ -607,21 +611,28 @@ class SentenceModel(Chain):
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
 
+        if self.initial_embeddings is None:
+            self.add_link('embed', L.EmbedID(vocab_size, word_embedding_dim))
+
     def __call__(self, sentences, transitions, y_batch=None, train=True):
         ratio = 1 - self.keep_rate
 
         batch_size = sentences.shape[0]
 
         # Get Embeddings
-        sentences = self.initial_embeddings.take(sentences, axis=0
-            ).astype(np.float32)
-
-        x = sentences
+        if self.initial_embeddings is not None:
+            x = self.initial_embeddings.take(sentences, axis=0
+                ).astype(np.float32)
+        else:
+            x = self.embed(sentences)
 
         if self.__gpu >= 0:
-            x = cuda.to_gpu(x)
-
-        x = Variable(x, volatile=not train)
+            if self.initial_embeddings is not None:
+                x = cuda.to_gpu(x)
+            else:
+                raise Exception("Not implemented.")
+        if not isinstance(x, Variable):
+            x = Variable(x, volatile=not train)
 
         batch_size, seq_length = x.shape[0], x.shape[1]
 
