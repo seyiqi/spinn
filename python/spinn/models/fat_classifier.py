@@ -496,6 +496,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("deq_length", 10, "Max trailing examples to use for statistics.")
     gflags.DEFINE_integer("seq_length", 30, "")
     gflags.DEFINE_integer("eval_seq_length", 30, "")
+    gflags.DEFINE_boolean("use_internal_parser", False, "Use predicted parse rather than ground truth.")
     gflags.DEFINE_boolean("smart_batching", True, "Organize batches using sequence length.")
     gflags.DEFINE_boolean("use_peano", True, "A mind-blowing sorting key.")
     gflags.DEFINE_integer("eval_data_limit", -1, "Truncate evaluation set. -1 indicates no truncation.")
