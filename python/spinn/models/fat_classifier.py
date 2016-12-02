@@ -427,7 +427,10 @@ def run(only_forward=False):
                 avg_class_acc = np.array(accum_class_acc).mean()
                 all_preds = flatten(accum_preds)
                 all_truth = flatten(accum_truth)
-                avg_trans_acc = metrics.accuracy_score(all_preds, all_truth)
+                if transition_loss is not None:
+                    avg_trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
+                else:
+                    avg_trans_acc = 0.0
                 logger.Log(
                     "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
                     % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
