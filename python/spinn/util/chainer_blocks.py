@@ -413,16 +413,7 @@ class Embed(Chain):
         if self.use_input_dropout:
             embeds = F.dropout(embeds, self.dropout, embeds.volatile == 'off')
 
-        # if not self.make_buffers:
-        #     return F.reshape(embeds, (b, l, -1))
-        embeds = F.split_axis(to_cpu(embeds), b, axis=0, force_tuple=True)
-        embeds = [F.split_axis(x, l, axis=0, force_tuple=True) for x in embeds]
-        buffers = [list(reversed(x)) for x in embeds]
-        # for ex, buf in zip(list(tokens), buffers):
-        #     for tok, var in zip(ex, reversed(buf)):
-        #         var.tokens = [tok]
-        #         var.transitions = [0]
-        return buffers
+        return to_cpu(embeds)
 
 
 class Reduce(Chain):
