@@ -98,7 +98,7 @@ def hamming_distance(s1, s2):
     return sum(el1 != el2 for el1, el2 in zip(s1, s2))
 
 
-def evaluate(classifier_trainer, eval_set, logger, step,
+def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1
              use_internal_parser=False, vocabulary=None):
     # Evaluate
     acc_accum = 0.0
@@ -119,15 +119,18 @@ def evaluate(classifier_trainer, eval_set, logger, step,
 
     for i, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in enumerate(eval_set[1]):
         # Calculate Local Accuracies
-        ret = classifier_trainer.forward({
-            "sentences": eval_X_batch,
-            "transitions": eval_transitions_batch,
-            }, eval_y_batch, train=False, predict=False,
-            use_internal_parser=use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions)
-        y, loss, class_loss, transition_acc, transition_loss = ret
-        acc_value = float(classifier_trainer.model.accuracy.data)
-        action_acc_value = transition_acc
+        if eval_data_limit == -1 or i < eval_data_limit:
+            ret = classifier_trainer.forward({
+                "sentences": eval_X_batch,
+                "transitions": eval_transitions_batch,
+                }, eval_y_batch, train=False, predict=False,
+                use_internal_parser=use_internal_parser,
+                validate_transitions=FLAGS.validate_transitions)
+            y, loss, class_loss, transition_acc, transition_loss = ret
+            acc_value = float(classifier_trainer.model.accuracy.data)
+            action_acc_value = transition_acc
+        else:
+            break
 
         # Update Aggregate Accuracies
         acc_accum += acc_value
@@ -250,8 +253,7 @@ def run(only_forward=False):
             for_rnn=FLAGS.model_type == "RNN" or FLAGS.model_type == "CBOW",
             use_left_padding=FLAGS.use_left_padding)
         eval_it = util.MakeEvalIterator((e_X, e_transitions, e_y, e_num_transitions),
-            FLAGS.batch_size, FLAGS.eval_data_limit,
-            shuffle=FLAGS.shuffle_eval, rseed=FLAGS.shuffle_eval_seed)
+            FLAGS.batch_size, shuffle=FLAGS.shuffle_eval, rseed=FLAGS.shuffle_eval_seed)
         eval_iterators.append((filename, eval_it))
 
     # Set up the placeholders.
@@ -321,7 +323,7 @@ def run(only_forward=False):
     # Do an evaluation-only run.
     if only_forward:
         for index, eval_set in enumerate(eval_iterators):
-            acc = evaluate(classifier_trainer, eval_set, logger, step, FLAGS.use_internal_parser, vocabulary)
+            acc = evaluate(classifier_trainer, eval_set, logger, step, FLAGS.use_internal_parser, vocabulary, eval_data_limit=FLAGS.eval_data_limit)
     else:
          # Train
         logger.Log("Training.")
@@ -446,9 +448,19 @@ def run(only_forward=False):
                 accum_preds.clear()
                 accum_truth.clear()
 
-            if step > 0 and step % FLAGS.eval_interval_steps == 0:
+            if step > 0 and step % FLAGS.ckpt_interval_steps:
                 for index, eval_set in enumerate(eval_iterators):
-                    acc = evaluate(classifier_trainer, eval_set, logger, step)
+                    acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1)
+                    if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
+                        best_dev_error = 1 - acc
+                        logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
+                        classifier_trainer.save(checkpoint_path, step, best_dev_error)
+                    if FLAGS.write_summaries:
+                        dev_summary_logger.log(step=step, loss=0.0, accuracy=acc)
+                progress_bar.reset()
+            elif step > 0 and step % FLAGS.eval_interval_steps == 0:
+                for index, eval_set in enumerate(eval_iterators):
+                    acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=FLAGS.eval_data_limit)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < 0.99 * best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
@@ -456,6 +468,7 @@ def run(only_forward=False):
                     if FLAGS.write_summaries:
                         dev_summary_logger.log(step=step, loss=0.0, accuracy=acc)
                 progress_bar.reset()
+
 
             if FLAGS.profile and step >= FLAGS.profile_steps:
                 break
@@ -525,6 +538,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
 
+    gflags.DEFINE_boolean("use_internal_parser", False, "")
     gflags.DEFINE_boolean("use_shift_composition", True, "")
     gflags.DEFINE_boolean("use_history", False, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
@@ -540,8 +554,8 @@ if __name__ == '__main__':
         "Used for dropout on transformed embeddings.")
     gflags.DEFINE_boolean("use_input_dropout", False, "")
     gflags.DEFINE_boolean("use_input_norm", False, "")
-    gflags.DEFINE_boolean("use_tracker_dropout", True, "")
-    gflags.DEFINE_boolean("use_classifier_norm", True, "")
+    gflags.DEFINE_boolean("use_tracker_dropout", False, "")
+    gflags.DEFINE_boolean("use_classifier_norm", False, "")
     gflags.DEFINE_float("tracker_dropout_rate", 0.1, "")
     gflags.DEFINE_boolean("lstm_composition", True, "")
 
