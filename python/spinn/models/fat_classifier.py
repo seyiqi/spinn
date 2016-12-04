@@ -349,6 +349,7 @@ def run(only_forward=False):
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
+        printed_total_weights = False
         for step in range(step, FLAGS.training_steps):
             X_batch, transitions_batch, y_batch, _ = training_data_iter.next()
 
@@ -361,6 +362,13 @@ def run(only_forward=False):
                 "transitions": transitions_batch,
                 }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
+
+            if not printed_total_weights:
+                printed_total_weights = True
+                def prod(l):
+                    return reduce(lambda x, y: x * y, l, 1.0)
+                total_weights = sum([prod(w.shape) for w in model.params()])
+                logger.Log("Total Weights: {}".format(total_weights))
 
             # Accumulate stats for confusion matrix.
             preds = [m["preds_cm"] for m in model.spinn.memories]
