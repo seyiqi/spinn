@@ -98,7 +98,7 @@ def hamming_distance(s1, s2):
     return sum(el1 != el2 for el1, el2 in zip(s1, s2))
 
 
-def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1
+def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
              use_internal_parser=False, vocabulary=None):
     # Evaluate
     acc_accum = 0.0
@@ -538,7 +538,6 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
 
-    gflags.DEFINE_boolean("use_internal_parser", False, "")
     gflags.DEFINE_boolean("use_shift_composition", True, "")
     gflags.DEFINE_boolean("use_history", False, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
