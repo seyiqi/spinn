@@ -448,7 +448,7 @@ def run(only_forward=False):
                 accum_preds.clear()
                 accum_truth.clear()
 
-            if step > 0 and step % FLAGS.ckpt_interval_steps:
+            if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
                 for index, eval_set in enumerate(eval_iterators):
                     acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
