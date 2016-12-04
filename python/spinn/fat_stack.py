@@ -434,6 +434,7 @@ class BaseModel(Chain):
                  use_history=False,
                  save_stack=False,
                  use_reinforce=False,
+                 projection_dim=None,
                  encoding_dim=None,
                  use_encode=False,
                  use_skips=False,
@@ -461,8 +462,11 @@ class BaseModel(Chain):
         self.use_reinforce = use_reinforce
         self.use_encode = use_encode
 
+        if projection_dim <= 0 or not self.use_encode:
+            projection_dim = model_dim/2
+
         args = {
-            'size': model_dim/2,
+            'size': projection_dim,
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
             'transition_weight': transition_weight,
             'use_history': use_history,
@@ -492,9 +496,10 @@ class BaseModel(Chain):
                  attention=False, attn_fn=None, use_reinforce=use_reinforce, use_skips=use_skips))
 
         if self.use_encode:
-            encoding_dim = model_dim/2 if encoding_dim <= 0 else encoding_dim
-            self.add_link('fwd_rnn', LSTMChain(input_dim=model_dim, hidden_dim=encoding_dim, seq_length=seq_length))
-            self.add_link('bwd_rnn', LSTMChain(input_dim=model_dim, hidden_dim=encoding_dim, seq_length=seq_length))
+            # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather
+            # than just [concat(fwd, bwd)]. More generally, [concat(embed, activation(embed))].
+            self.add_link('fwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
+            self.add_link('bwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
 
 
     def build_example(self, sentences, transitions, train):
