@@ -385,12 +385,14 @@ class LSTMChain(Chain):
         self.__gpu = gpu
         self.__mod = cuda.cupy if gpu >= 0 else np
 
-    def __call__(self, x_batch, train=True, keep_hs=False):
+    def __call__(self, x_batch, train=True, keep_hs=False, reverse=False):
         batch_size = x_batch.data.shape[0]
         c = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
         h = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
         hs = []
         batches = F.split_axis(x_batch, self.seq_length, axis=1)
+        if reverse:
+            batches = list(reversed(batches))
         for x in batches:
             ii = self.i_fwd(x)
             hh = self.h_fwd(h)
@@ -408,6 +410,8 @@ class LSTMChain(Chain):
             # This converts list of: [(#batch_size, 1, #hidden_dim)]
             # To single tensor:       (#batch_size, #seq_length, #hidden_dim)
             # Which matches the input shape.
+            if reverse:
+                hs = list(reversed(hs))
             hs = F.concat(hs, axis=1)
         else:
             hs = None
@@ -430,6 +434,8 @@ class BaseModel(Chain):
                  use_history=False,
                  save_stack=False,
                  use_reinforce=False,
+                 encoding_dim=None,
+                 use_encode=False,
                  use_skips=False,
                  use_sentence_pair=False,
                  **kwargs
@@ -453,7 +459,7 @@ class BaseModel(Chain):
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
         self.use_reinforce = use_reinforce
-        self.encode = True
+        self.use_encode = use_encode
 
         args = {
             'size': model_dim/2,
@@ -485,8 +491,10 @@ class BaseModel(Chain):
         self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
                  attention=False, attn_fn=None, use_reinforce=use_reinforce, use_skips=use_skips))
 
-        if self.encode:
-            self.add_link('fwd_rnn', LSTMChain(input_dim=model_dim, hidden_dim=model_dim, seq_length=seq_length))
+        if self.use_encode:
+            encoding_dim = model_dim/2 if encoding_dim <= 0 else encoding_dim
+            self.add_link('fwd_rnn', LSTMChain(input_dim=model_dim, hidden_dim=encoding_dim, seq_length=seq_length))
+            self.add_link('bwd_rnn', LSTMChain(input_dim=model_dim, hidden_dim=encoding_dim, seq_length=seq_length))
 
 
     def build_example(self, sentences, transitions, train):
@@ -502,8 +510,10 @@ class BaseModel(Chain):
         embeds = [F.expand_dims(x, 0) for x in embeds]
         embeds = F.concat(embeds, axis=0)
 
-        if self.encode:
-            _, _, hs = self.fwd_rnn(embeds, train, keep_hs=True)
+        if self.use_encode:
+            _, _, fwd_hs = self.fwd_rnn(embeds, train, keep_hs=True)
+            _, _, bwd_hs = self.bwd_rnn(embeds, train, keep_hs=True, reverse=True)
+            hs = F.concat([fwd_hs, bwd_hs], axis=2)
             embeds = hs
 
         embeds = [F.split_axis(x, l, axis=0, force_tuple=True) for x in embeds]
@@ -514,6 +524,7 @@ class BaseModel(Chain):
         example.tokens = buffers
 
         return example
+
 
     def run_spinn(self, example, train, use_internal_parser, validate_transitions=True):
         r = reporter.Reporter()

@@ -75,6 +75,8 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
+             use_encode=FLAGS.use_encode,
+             encoding_dim=FLAGS.encoding_dim,
             )
 
     classifier_trainer = trainer_cls(model, gpu=gpu)
@@ -537,7 +539,8 @@ if __name__ == '__main__':
 
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
-
+    gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
+    gflags.DEFINE_integer("encoding_dim", -1, "Dimension for encoding network.")
     gflags.DEFINE_boolean("use_shift_composition", True, "")
     gflags.DEFINE_boolean("use_history", False, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
