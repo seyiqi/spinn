@@ -154,11 +154,6 @@ class SPINN(Chain):
     def __init__(self, args, vocab, normalization=L.BatchNormalization,
                  attention=False, attn_fn=None, use_reinforce=True, use_skips=False):
         super(SPINN, self).__init__(
-            embed=Embed(args.size, vocab.size, args.input_dropout_rate,
-                        vectors=vocab.vectors, normalization=normalization,
-                        use_input_dropout=args.use_input_dropout,
-                        use_input_norm=args.use_input_norm,
-                        ),
             reduce=Reduce(args.size, args.tracker_size, attention, attn_fn))
         if args.tracker_size is not None:
             self.add_link('tracker', Tracker(
@@ -179,7 +174,7 @@ class SPINN(Chain):
 
     def __call__(self, example, attention=None, print_transitions=False,
                  use_internal_parser=False, validate_transitions=True):
-        self.bufs = self.embed(example.tokens)
+        self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
         self.buffers_t = [0 for buf in self.bufs]
         # There are 2 * N - 1 transitons, so (|transitions| + 1) / 2 should equal N.
@@ -378,6 +373,52 @@ class SPINN(Chain):
         return [stack[-1] for stack in self.stacks], transition_loss
 
 
+class LSTMChain(Chain):
+    def __init__(self, input_dim, hidden_dim, seq_length, gpu=-1):
+        super(LSTMChain, self).__init__(
+            i_fwd=L.Linear(input_dim, 4 * hidden_dim, nobias=True),
+            h_fwd=L.Linear(hidden_dim, 4 * hidden_dim),
+        )
+        self.seq_length = seq_length
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.__gpu = gpu
+        self.__mod = cuda.cupy if gpu >= 0 else np
+
+    def __call__(self, x_batch, train=True, keep_hs=False, reverse=False):
+        batch_size = x_batch.data.shape[0]
+        c = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
+        h = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
+        hs = []
+        batches = F.split_axis(x_batch, self.seq_length, axis=1)
+        if reverse:
+            batches = list(reversed(batches))
+        for x in batches:
+            ii = self.i_fwd(x)
+            hh = self.h_fwd(h)
+            ih = ii + hh
+            c, h = F.lstm(c, ih)
+
+            if keep_hs:
+                # Convert from (#batch_size, #hidden_dim) ->
+                #              (#batch_size, 1, #hidden_dim)
+                # This is important for concatenation later.
+                h_reshaped = F.reshape(h, (batch_size, 1, self.hidden_dim))
+                hs.append(h_reshaped)
+
+        if keep_hs:
+            # This converts list of: [(#batch_size, 1, #hidden_dim)]
+            # To single tensor:       (#batch_size, #seq_length, #hidden_dim)
+            # Which matches the input shape.
+            if reverse:
+                hs = list(reversed(hs))
+            hs = F.concat(hs, axis=1)
+        else:
+            hs = None
+
+        return c, h, hs
+
+
 class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
@@ -393,6 +434,9 @@ class BaseModel(Chain):
                  use_history=False,
                  save_stack=False,
                  use_reinforce=False,
+                 projection_dim=None,
+                 encoding_dim=None,
+                 use_encode=False,
                  use_skips=False,
                  use_sentence_pair=False,
                  **kwargs
@@ -416,9 +460,13 @@ class BaseModel(Chain):
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
         self.use_reinforce = use_reinforce
+        self.use_encode = use_encode
+
+        if projection_dim <= 0 or not self.use_encode:
+            projection_dim = model_dim/2
 
         args = {
-            'size': model_dim/2,
+            'size': projection_dim,
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
             'transition_weight': transition_weight,
             'use_history': use_history,
@@ -437,12 +485,50 @@ class BaseModel(Chain):
         }
         vocab = argparse.Namespace(**vocab)
 
+        self.add_link('embed', 
+                    Embed(args.size, vocab.size, args.input_dropout_rate,
+                        vectors=vocab.vectors, normalization=L.BatchNormalization,
+                        use_input_dropout=args.use_input_dropout,
+                        use_input_norm=args.use_input_norm,
+                        ))
+
         self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
                  attention=False, attn_fn=None, use_reinforce=use_reinforce, use_skips=use_skips))
+
+        if self.use_encode:
+            # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather
+            # than just [concat(fwd, bwd)]. More generally, [concat(embed, activation(embed))].
+            self.add_link('fwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
+            self.add_link('bwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
 
 
     def build_example(self, sentences, transitions, train):
         raise Exception('Not implemented.')
+
+
+    def run_embed(self, example, train):
+        embeds = self.embed(example.tokens)
+
+        b, l = example.tokens.shape[:2]
+
+        embeds = F.split_axis(to_cpu(embeds), b, axis=0, force_tuple=True)
+        embeds = [F.expand_dims(x, 0) for x in embeds]
+        embeds = F.concat(embeds, axis=0)
+
+        if self.use_encode:
+            _, _, fwd_hs = self.fwd_rnn(embeds, train, keep_hs=True)
+            _, _, bwd_hs = self.bwd_rnn(embeds, train, keep_hs=True, reverse=True)
+            hs = F.concat([fwd_hs, bwd_hs], axis=2)
+            embeds = hs
+
+        embeds = [F.split_axis(x, l, axis=0, force_tuple=True) for x in embeds]
+        buffers = [list(reversed(x)) for x in embeds]
+
+        assert b == len(buffers)
+
+        example.tokens = buffers
+
+        return example
 
 
     def run_spinn(self, example, train, use_internal_parser, validate_transitions=True):
@@ -476,6 +562,7 @@ class BaseModel(Chain):
     def __call__(self, sentences, transitions, y_batch=None, train=True,
                  use_internal_parser=False, validate_transitions=True):
         example = self.build_example(sentences, transitions, train)
+        example = self.run_embed(example, train)
         h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser, validate_transitions)
         y = self.run_mlp(h, train)
 

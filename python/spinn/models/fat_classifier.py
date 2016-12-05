@@ -75,6 +75,8 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
+             use_encode=FLAGS.use_encode,
+             projection_dim=FLAGS.projection_dim,
             )
 
     classifier_trainer = trainer_cls(model, gpu=gpu)
@@ -323,7 +325,10 @@ def run(only_forward=False):
     # Do an evaluation-only run.
     if only_forward:
         for index, eval_set in enumerate(eval_iterators):
-            acc = evaluate(classifier_trainer, eval_set, logger, step, FLAGS.use_internal_parser, vocabulary, eval_data_limit=FLAGS.eval_data_limit)
+            acc = evaluate(classifier_trainer, eval_set, logger, step,
+                use_internal_parser=FLAGS.use_internal_parser,
+                vocabulary=vocabulary,
+                eval_data_limit=FLAGS.eval_data_limit)
     else:
          # Train
         logger.Log("Training.")
@@ -347,6 +352,7 @@ def run(only_forward=False):
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
+        printed_total_weights = False
         for step in range(step, FLAGS.training_steps):
             X_batch, transitions_batch, y_batch, _ = training_data_iter.next()
 
@@ -359,6 +365,13 @@ def run(only_forward=False):
                 "transitions": transitions_batch,
                 }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
+
+            if not printed_total_weights:
+                printed_total_weights = True
+                def prod(l):
+                    return reduce(lambda x, y: x * y, l, 1.0)
+                total_weights = sum([prod(w.shape) for w in model.params()])
+                logger.Log("Total Weights: {}".format(total_weights))
 
             # Accumulate stats for confusion matrix.
             preds = [m["preds_cm"] for m in model.spinn.memories]
@@ -450,7 +463,8 @@ def run(only_forward=False):
 
             if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
                 for index, eval_set in enumerate(eval_iterators):
-                    acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1)
+                    acc = evaluate(classifier_trainer, eval_set, logger, step,
+                        eval_data_limit=-1)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
@@ -537,7 +551,8 @@ if __name__ == '__main__':
 
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
-
+    gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
+    gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_shift_composition", True, "")
     gflags.DEFINE_boolean("use_history", False, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
