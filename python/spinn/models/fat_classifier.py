@@ -363,7 +363,8 @@ def run(only_forward=False):
             ret = classifier_trainer.forward({
                 "sentences": X_batch,
                 "transitions": transitions_batch,
-                }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions)
+                }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions,
+                   use_internal_parser=FLAGS.use_internal_parser)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
             if not printed_total_weights:
@@ -464,7 +465,7 @@ def run(only_forward=False):
             if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
                 for index, eval_set in enumerate(eval_iterators):
                     acc = evaluate(classifier_trainer, eval_set, logger, step,
-                        eval_data_limit=-1)
+                        eval_data_limit=-1, use_internal_parser=FLAGS.use_internal_parser)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
