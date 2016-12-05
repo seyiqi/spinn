@@ -325,7 +325,10 @@ def run(only_forward=False):
     # Do an evaluation-only run.
     if only_forward:
         for index, eval_set in enumerate(eval_iterators):
-            acc = evaluate(classifier_trainer, eval_set, logger, step, FLAGS.use_internal_parser, vocabulary, eval_data_limit=FLAGS.eval_data_limit)
+            acc = evaluate(classifier_trainer, eval_set, logger, step,
+                use_internal_parser=FLAGS.use_internal_parser,
+                vocabulary=vocabulary,
+                eval_data_limit=FLAGS.eval_data_limit)
     else:
          # Train
         logger.Log("Training.")
@@ -460,7 +463,8 @@ def run(only_forward=False):
 
             if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
                 for index, eval_set in enumerate(eval_iterators):
-                    acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1)
+                    acc = evaluate(classifier_trainer, eval_set, logger, step,
+                        eval_data_limit=-1)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
