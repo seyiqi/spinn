@@ -57,7 +57,7 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
                               seq_length, num_classes, initial_embeddings, use_sentence_pair,
                               gpu):
     model = model_cls(model_dim, word_embedding_dim, vocab_size,
-             seq_length, initial_embeddings, num_classes, mlp_dim=1024,
+             seq_length, initial_embeddings, num_classes, mlp_dim=FLAGS.mlp_dim,
              input_keep_rate=FLAGS.embedding_keep_rate,
              classifier_keep_rate=FLAGS.semantic_classifier_keep_rate,
              use_input_dropout=FLAGS.use_input_dropout,
@@ -544,6 +544,7 @@ if __name__ == '__main__':
         "(i.e., in Model 1 and Model 2S.)")
     gflags.DEFINE_integer("gpu", -1, "")
     gflags.DEFINE_integer("model_dim", 8, "")
+    gflags.DEFINE_integer("mlp_dim", 1024, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
 
     gflags.DEFINE_float("transition_weight", None, "")

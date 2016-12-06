@@ -17,11 +17,11 @@ from spinn import util
 SENTENCE_PAIR_DATA = False
 
 NUMBERS = range(-10, 11)
-# OUTPUTS = range(-100, 101)
-OUTPUTS = range(-50, 50)
+OUTPUTS = range(-100, 101)
+# OUTPUTS = range(-50, 50)
 NUM_CLASSES = len(OUTPUTS)
 
-FIXED_VOCABULARY = {str(x): x + min(NUMBERS) for x in NUMBERS}
+FIXED_VOCABULARY = {str(x): k for x, k in zip(NUMBERS, range(len(NUMBERS)))}
 FIXED_VOCABULARY.update({
     util.PADDING_TOKEN: len(FIXED_VOCABULARY) + 0,
     "+": len(FIXED_VOCABULARY) + 1,
@@ -29,7 +29,7 @@ FIXED_VOCABULARY.update({
 })
 assert len(set(FIXED_VOCABULARY.values())) == len(FIXED_VOCABULARY.values())
 
-LABEL_MAP = {str(x): x - min(OUTPUTS) for x in OUTPUTS}
+LABEL_MAP = {str(x): k for x, k in zip(OUTPUTS, range(len(OUTPUTS)))}
 
 def convert_binary_bracketed_data(filename):
     examples = []
