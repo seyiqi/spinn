@@ -26,6 +26,13 @@ import sys
 import time
 from collections import deque
 
+# Chainer Type Check is a major bottleneck for small networks,
+# sometimes giving more than 4x speedup by turning it off.
+# We turn type check off by default, but can set an env var to
+# turn it on if debugging.
+if os.environ.get('FORCE_CHAINER_TYPE_CHECK', '0') == '0':
+    os.environ['CHAINER_TYPE_CHECK'] = '0'
+
 import gflags
 import numpy as np
 
@@ -491,7 +498,7 @@ def run(only_forward=False):
 
 if __name__ == '__main__':
     # Debug settings.
-    gflags.DEFINE_bool("debug", True, "Set to True to disable debug_mode and type_checking.")
+    gflags.DEFINE_bool("debug", False, "Set to True to disable debug_mode and type_checking.")
     gflags.DEFINE_bool("print_confusion_matrix", False, "Periodically print CM on transitions.")
     gflags.DEFINE_bool("gradient_check", False, "Randomly check that gradients match estimates.")
     gflags.DEFINE_bool("profile", False, "Set to True to quit after a few batches.")
@@ -614,9 +621,8 @@ if __name__ == '__main__':
             timestamp,
             )
 
-    if not FLAGS.debug:
-        chainer.set_debug(False)
-        os.environ['CHAINER_TYPE_CHECK'] = '0'
+    if FLAGS.debug:
+        chainer.set_debug(True)
 
     if not FLAGS.branch_name:
         FLAGS.branch_name = os.popen('git rev-parse --abbrev-ref HEAD').read().strip()
