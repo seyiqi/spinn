@@ -134,7 +134,8 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 "transitions": eval_transitions_batch,
                 }, eval_y_batch, train=False, predict=False,
                 use_internal_parser=use_internal_parser,
-                validate_transitions=FLAGS.validate_transitions)
+                validate_transitions=FLAGS.validate_transitions,
+                use_random=FLAGS.use_random)
             y, loss, class_loss, transition_acc, transition_loss = ret
             acc_value = float(classifier_trainer.model.accuracy.data)
             action_acc_value = transition_acc
@@ -370,8 +371,10 @@ def run(only_forward=False):
             ret = classifier_trainer.forward({
                 "sentences": X_batch,
                 "transitions": transitions_batch,
-                }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions,
-                   use_internal_parser=FLAGS.use_internal_parser)
+                }, y_batch, train=True, predict=False,
+                    validate_transitions=FLAGS.validate_transitions,
+                    use_internal_parser=FLAGS.use_internal_parser,
+                    use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
             if not printed_total_weights:
@@ -575,6 +578,8 @@ if __name__ == '__main__':
     gflags.DEFINE_float("embedding_keep_rate", 0.9,
         "Used for dropout on transformed embeddings.")
     gflags.DEFINE_boolean("use_input_dropout", False, "")
+    gflags.DEFINE_boolean("use_random", False, "When predicting parse, rather than logits,"
+                                               "use a uniform distribution over actions.")
     gflags.DEFINE_boolean("use_input_norm", False, "")
     gflags.DEFINE_boolean("use_tracker_dropout", False, "")
     gflags.DEFINE_boolean("use_classifier_norm", False, "")
