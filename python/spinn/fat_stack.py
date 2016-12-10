@@ -612,6 +612,8 @@ class BaseModel(Chain):
     def __call__(self, sentences, transitions, y_batch=None, train=True,
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         example = self.build_example(sentences, transitions, train)
+        assert example.tokens.data.min() >= 0
+        assert y_batch.min() >= 0
         example = self.run_embed(example, train)
         h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser, validate_transitions, use_random)
         y = self.run_mlp(h, train)
