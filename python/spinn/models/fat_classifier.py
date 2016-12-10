@@ -26,6 +26,13 @@ import sys
 import time
 from collections import deque
 
+# Chainer Type Check is a major bottleneck for small networks,
+# sometimes giving more than 4x speedup by turning it off.
+# We turn type check off by default, but can set an env var to
+# turn it on if debugging.
+if os.environ.get('FORCE_CHAINER_TYPE_CHECK', '0') == '0':
+    os.environ['CHAINER_TYPE_CHECK'] = '0'
+
 import gflags
 import numpy as np
 
@@ -55,9 +62,9 @@ FLAGS = gflags.FLAGS
 
 def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
                               seq_length, num_classes, initial_embeddings, use_sentence_pair,
-                              gpu):
+                              gpu, mlp_dim):
     model = model_cls(model_dim, word_embedding_dim, vocab_size,
-             seq_length, initial_embeddings, num_classes, mlp_dim=FLAGS.mlp_dim,
+             seq_length, initial_embeddings, num_classes, mlp_dim=mlp_dim,
              input_keep_rate=FLAGS.embedding_keep_rate,
              classifier_keep_rate=FLAGS.semantic_classifier_keep_rate,
              use_input_dropout=FLAGS.use_input_dropout,
@@ -82,14 +89,6 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
     classifier_trainer = trainer_cls(model, gpu=gpu)
 
     return classifier_trainer
-
-
-def build_rewards(logits, y, xent_reward=False):
-    if xent_reward:
-        return np.mean(logits.data[np.arange(y.shape[0]), y])
-    else:
-        return metrics.accuracy_score(logits.data.argmax(axis=1), y)
-
 
 def hamming_distance(s1, s2):
     """ source: https://en.wikipedia.org/wiki/Hamming_distance
@@ -127,7 +126,8 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 "transitions": eval_transitions_batch,
                 }, eval_y_batch, train=False, predict=False,
                 use_internal_parser=use_internal_parser,
-                validate_transitions=FLAGS.validate_transitions)
+                validate_transitions=FLAGS.validate_transitions,
+                use_random=FLAGS.use_random)
             y, loss, class_loss, transition_acc, transition_loss = ret
             acc_value = float(classifier_trainer.model.accuracy.data)
             action_acc_value = transition_acc
@@ -174,16 +174,6 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
     return acc_accum / eval_batches
 
 
-def reinforce(optimizer, lr, baseline, mu, reward, transition_loss):
-    new_lr = (lr*(reward - baseline))
-    baseline = baseline*(1-mu)+mu*reward
-
-    transition_loss.backward()
-    transition_loss.unchain_backward()
-    optimizer.lr = new_lr
-    optimizer.update()
-
-    return new_lr, baseline
 
 
 def run(only_forward=False):
@@ -287,7 +277,8 @@ def run(only_forward=False):
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
-                              FLAGS.gpu)
+                              FLAGS.gpu,
+                              FLAGS.mlp_dim)
     else:
         if hasattr(model_module, 'SentenceTrainer') and hasattr(model_module, 'SentenceModel'):
             trainer_cls = model_module.SentenceTrainer
@@ -301,12 +292,14 @@ def run(only_forward=False):
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
-                              FLAGS.gpu)
+                              FLAGS.gpu,
+                              FLAGS.mlp_dim)
 
     if ".ckpt" in FLAGS.ckpt_path:
         checkpoint_path = FLAGS.ckpt_path
     else:
         checkpoint_path = os.path.join(FLAGS.ckpt_path, FLAGS.experiment_name + ".ckpt")
+
     if os.path.isfile(checkpoint_path):
         # TODO: Check that resuming works fine with tf summaries.
         logger.Log("Found checkpoint, restoring.")
@@ -340,13 +333,6 @@ def run(only_forward=False):
 
         model = classifier_trainer.optimizer.target
 
-        if FLAGS.use_reinforce:
-            optimizer_lr = 0.01
-            baseline = 0
-            mu = 0.1
-            transition_optimizer = optimizers.SGD(lr=optimizer_lr)
-            transition_optimizer.setup(model.spinn.tracker)
-
         # New Training Loop
         progress_bar = SimpleProgressBar(msg="Training", bar_length=60, enabled=FLAGS.show_progress_bar)
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
@@ -363,7 +349,10 @@ def run(only_forward=False):
             ret = classifier_trainer.forward({
                 "sentences": X_batch,
                 "transitions": transitions_batch,
-                }, y_batch, train=True, predict=False, validate_transitions=FLAGS.validate_transitions)
+                }, y_batch, train=True, predict=False,
+                    validate_transitions=FLAGS.validate_transitions,
+                    use_internal_parser=FLAGS.use_internal_parser,
+                    use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
             if not printed_total_weights:
@@ -378,10 +367,6 @@ def run(only_forward=False):
             truth = [m["truth_cm"] for m in model.spinn.memories]
             accum_preds.append(preds)
             accum_truth.append(truth)
-
-            if FLAGS.use_reinforce:
-                rewards = build_rewards(y, y_batch)
-                logger.Log("\nReward :"+str(rewards))
 
             # Boilerplate for calculating loss.
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
@@ -423,10 +408,6 @@ def run(only_forward=False):
                 import ipdb; ipdb.set_trace()
                 pass
 
-            if FLAGS.use_reinforce:
-                transition_optimizer.zero_grads()
-                optimizer_lr, baseline = reinforce(transition_optimizer, optimizer_lr, baseline, mu, rewards, transition_loss)
-
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
 
@@ -464,7 +445,7 @@ def run(only_forward=False):
             if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
                 for index, eval_set in enumerate(eval_iterators):
                     acc = evaluate(classifier_trainer, eval_set, logger, step,
-                        eval_data_limit=-1)
+                        eval_data_limit=-1, use_internal_parser=FLAGS.use_internal_parser)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
@@ -490,7 +471,7 @@ def run(only_forward=False):
 
 if __name__ == '__main__':
     # Debug settings.
-    gflags.DEFINE_bool("debug", True, "Set to True to disable debug_mode and type_checking.")
+    gflags.DEFINE_bool("debug", False, "Set to True to disable debug_mode and type_checking.")
     gflags.DEFINE_bool("print_confusion_matrix", False, "Periodically print CM on transitions.")
     gflags.DEFINE_bool("gradient_check", False, "Randomly check that gradients match estimates.")
     gflags.DEFINE_bool("profile", False, "Set to True to quit after a few batches.")
@@ -546,6 +527,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("mlp_dim", 1024, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
+    gflags.DEFINE_integer("mlp_dim", 1024, "")
 
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
@@ -568,6 +550,8 @@ if __name__ == '__main__':
     gflags.DEFINE_float("embedding_keep_rate", 0.9,
         "Used for dropout on transformed embeddings.")
     gflags.DEFINE_boolean("use_input_dropout", False, "")
+    gflags.DEFINE_boolean("use_random", False, "When predicting parse, rather than logits,"
+                                               "use a uniform distribution over actions.")
     gflags.DEFINE_boolean("use_input_norm", False, "")
     gflags.DEFINE_boolean("use_tracker_dropout", False, "")
     gflags.DEFINE_boolean("use_classifier_norm", False, "")
@@ -614,9 +598,8 @@ if __name__ == '__main__':
             timestamp,
             )
 
-    if not FLAGS.debug:
-        chainer.set_debug(False)
-        os.environ['CHAINER_TYPE_CHECK'] = '0'
+    if FLAGS.debug:
+        chainer.set_debug(True)
 
     if not FLAGS.branch_name:
         FLAGS.branch_name = os.popen('git rev-parse --abbrev-ref HEAD').read().strip()
