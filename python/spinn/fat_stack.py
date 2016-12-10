@@ -20,12 +20,14 @@ from chainer.training import extensions
 
 from chainer.functions.activation import slstm
 from chainer.utils import type_check
+from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
 
 from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
 from spinn.util.chainer_blocks import LSTMState, Embed
 from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm
+from sklearn import metrics
 
 """
 Style Guide:
@@ -70,6 +72,9 @@ def HeKaimingInit(shape, real_shape=None):
 
     return np.random.normal(scale=np.sqrt(4.0/(fan[0] + fan[1])),
                             size=shape)
+
+def expandAlong(rewards, tr_mask):
+    return np.extract(tr_mask.T, np.tile(rewards, (tr_mask.shape[1], 1)))
 
 
 class SentencePairTrainer(BaseSentencePairTrainer):
@@ -169,14 +174,22 @@ class SPINN(Chain):
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
         self.choices = np.array(choices, dtype=np.int32)
 
-    def reset_state(self):
-        self.memories = []
+        if self.use_reinforce:
+            self.reinforce_lr = 0.01
+            self.baseline = 0
+            self.mu = 0.1
+            # self.transition_optimizer = optimizers.SGD(lr=self.reinforce_lr)
+            self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
+            self.transition_optimizer.setup(self.tracker)
 
     def __call__(self, example, attention=None, print_transitions=False,
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
         self.buffers_t = [0 for buf in self.bufs]
+        self.memories = []
+        self.transition_mask = np.zeros((len(example.tokens), len(example.tokens[0])), dtype=bool)
+
         # There are 2 * N - 1 transitons, so (|transitions| + 1) / 2 should equal N.
         self.buffers_n = [(len([t for t in ts if t != T_SKIP]) + 1) / 2 for ts in example.transitions]
         for stack, buf in zip(self.stacks, self.bufs):
@@ -196,9 +209,6 @@ class SPINN(Chain):
                         use_random=use_random)
 
     def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
-        # TODO: Almost definitely these don't work as expected because of how
-        # things are initialized and because of the SKIP action.
-
         DEFAULT_CHOICE = T_SHIFT
         cant_skip = np.array([p == T_SKIP and t != T_SKIP for t, p in zip(transitions, preds)])
         preds[cant_skip] = DEFAULT_CHOICE
@@ -248,6 +258,8 @@ class SPINN(Chain):
                     transition_hyp = to_cpu(transition_hyp)
                     if hasattr(self, 'transitions'):
                         memory = {}
+                        truth_acc = transitions
+                        hyp_xent = transition_hyp
                         if self.use_reinforce:
                             probas = F.softmax(transition_hyp)
                             samples = np.array([T_SKIP for _ in self.bufs], dtype=np.int32)
@@ -255,14 +267,10 @@ class SPINN(Chain):
 
                             transition_preds = samples
                             hyp_acc = probas
-                            hyp_xent = probas
-                            truth_acc = transitions
                             truth_xent = samples
                         else:
                             transition_preds = transition_hyp.data.argmax(axis=1)
                             hyp_acc = transition_hyp
-                            hyp_xent = transition_hyp
-                            truth_acc = transitions
                             truth_xent = transitions
 
                         if use_random:
@@ -282,8 +290,10 @@ class SPINN(Chain):
 
                             cant_skip_mask = np.tile(np.expand_dims(cant_skip, axis=1), (1, 2))
                             hyp_xent = F.split_axis(transition_hyp, transition_hyp.shape[0], axis=0)
-                            hyp_xent = F.concat([hyp_xent[i] for i, y in enumerate(cant_skip) if y], axis=0)
+                            hyp_xent = F.concat([hyp_xent[iii] for iii, y in enumerate(cant_skip) if y], axis=0)
                             truth_xent = truth_xent[cant_skip]
+
+                        self.transition_mask[cant_skip, i] = True
 
                         memory["hyp_acc"] = hyp_acc
                         memory["truth_acc"] = truth_acc
@@ -346,8 +356,7 @@ class SPINN(Chain):
                         stack.append(new_stack_item)
                         if self.use_history:
                             history.append(stack[-1])
-        if print_transitions:
-            print()
+
         if self.transition_weight is not None:
             # We compute statistics after the fact, since sub-batches can
             # have different sizes when not using skips.
@@ -365,6 +374,7 @@ class SPINN(Chain):
 
             transition_acc = F.accuracy(
                 hyp_acc, truth_acc.astype(np.int32))
+
             transition_loss = F.softmax_cross_entropy(
                 hyp_xent, truth_xent.astype(np.int32),
                 normalize=False)
@@ -376,6 +386,34 @@ class SPINN(Chain):
             transition_loss = None
 
         return [stack[-1] for stack in self.stacks], transition_loss
+
+
+    def reinforce(self, rewards):
+        statistics = zip(*[
+            (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
+            for m in self.memories])
+
+        statistics = [
+            F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
+            if isinstance(s[0], Variable) else
+            np.array(reduce(lambda x, y: x + y.tolist(), s, []))
+            for s in statistics]
+
+        hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+        # Expand rewards
+        rewards = expandAlong(rewards, self.transition_mask)
+
+        transition_loss = batch_weighted_softmax_cross_entropy(
+            hyp_xent, truth_xent.astype(np.int32), rewards - self.baseline,
+            normalize=False)
+
+        self.transition_optimizer.zero_grads()
+        self.baseline = self.baseline*(1-self.mu) + self.mu*np.mean(rewards)
+
+        transition_loss.backward()
+        transition_loss.unchain_backward()
+
+        self.transition_optimizer.update()
 
 
 class LSTMChain(Chain):
@@ -422,7 +460,6 @@ class LSTMChain(Chain):
             hs = None
 
         return c, h, hs
-
 
 class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
@@ -490,7 +527,7 @@ class BaseModel(Chain):
         }
         vocab = argparse.Namespace(**vocab)
 
-        self.add_link('embed', 
+        self.add_link('embed',
                     Embed(args.size, vocab.size, args.input_dropout_rate,
                         vectors=vocab.vectors, normalization=L.BatchNormalization,
                         use_input_dropout=args.use_input_dropout,
@@ -542,7 +579,6 @@ class BaseModel(Chain):
         r.add_observer('spinn', self.spinn)
         observation = {}
         with r.scope(observation):
-            self.spinn.reset_state()
             h_both, _ = self.spinn(example,
                                    use_internal_parser=use_internal_parser,
                                    validate_transitions=validate_transitions,
@@ -576,6 +612,10 @@ class BaseModel(Chain):
         # Calculate Loss & Accuracy.
         accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+
+        if self.use_reinforce:
+            rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
+            self.spinn.reinforce(rewards)
 
         if hasattr(transition_acc, 'data'):
           transition_acc = transition_acc.data
