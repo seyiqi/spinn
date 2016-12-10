@@ -62,9 +62,9 @@ FLAGS = gflags.FLAGS
 
 def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
                               seq_length, num_classes, initial_embeddings, use_sentence_pair,
-                              gpu):
+                              gpu, mlp_dim):
     model = model_cls(model_dim, word_embedding_dim, vocab_size,
-             seq_length, initial_embeddings, num_classes, mlp_dim=1024,
+             seq_length, initial_embeddings, num_classes, mlp_dim=mlp_dim,
              input_keep_rate=FLAGS.embedding_keep_rate,
              classifier_keep_rate=FLAGS.semantic_classifier_keep_rate,
              use_input_dropout=FLAGS.use_input_dropout,
@@ -277,7 +277,8 @@ def run(only_forward=False):
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
-                              FLAGS.gpu)
+                              FLAGS.gpu,
+                              FLAGS.mlp_dim)
     else:
         if hasattr(model_module, 'SentenceTrainer') and hasattr(model_module, 'SentenceModel'):
             trainer_cls = model_module.SentenceTrainer
@@ -291,7 +292,8 @@ def run(only_forward=False):
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
-                              FLAGS.gpu)
+                              FLAGS.gpu,
+                              FLAGS.mlp_dim)
 
     if ".ckpt" in FLAGS.ckpt_path:
         checkpoint_path = FLAGS.ckpt_path
@@ -524,6 +526,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("gpu", -1, "")
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
+    gflags.DEFINE_integer("mlp_dim", 1024, "")
 
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")

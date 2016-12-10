@@ -488,9 +488,13 @@ class BaseModel(Chain):
         the_gpu.gpu = gpu
 
         mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
-        self.add_link('l0', L.Linear(mlp_input_dim, mlp_dim))
-        self.add_link('l1', L.Linear(mlp_dim, mlp_dim))
-        self.add_link('l2', L.Linear(mlp_dim, num_classes))
+
+        if mlp_dim > -1:
+            self.add_link('l0', L.Linear(mlp_input_dim, mlp_dim))
+            self.add_link('l1', L.Linear(mlp_dim, mlp_dim))
+            self.add_link('l2', L.Linear(mlp_dim, num_classes))
+        else:
+            self.add_link('l0', L.Linear(mlp_input_dim, num_classes))
 
         self.classifier = CrossEntropyClassifier(gpu)
         self.__gpu = gpu
@@ -593,10 +597,13 @@ class BaseModel(Chain):
         # Pass through MLP Classifier.
         h = to_gpu(h)
         h = self.l0(h)
-        h = F.relu(h)
-        h = self.l1(h)
-        h = F.relu(h)
-        h = self.l2(h)
+
+        if hasattr(self, 'l1'):
+            h = F.relu(h)
+            h = self.l1(h)
+            h = F.relu(h)
+            h = self.l2(h)
+            
         y = h
 
         return y
