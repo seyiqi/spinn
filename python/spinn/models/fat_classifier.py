@@ -363,10 +363,11 @@ def run(only_forward=False):
                 logger.Log("Total Weights: {}".format(total_weights))
 
             # Accumulate stats for confusion matrix.
-            preds = [m["preds_cm"] for m in model.spinn.memories]
-            truth = [m["truth_cm"] for m in model.spinn.memories]
-            accum_preds.append(preds)
-            accum_truth.append(truth)
+            if FLAGS.print_confusion_matrix:
+                preds = [m["preds_cm"] for m in model.spinn.memories]
+                truth = [m["truth_cm"] for m in model.spinn.memories]
+                accum_preds.append(preds)
+                accum_truth.append(truth)
 
             # Boilerplate for calculating loss.
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
