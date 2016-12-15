@@ -30,42 +30,11 @@ from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu,
 from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
-"""
-Style Guide:
 
-1. Each __call__() or forward() should be documented with its
-   input and output types/dimensions.
-2. Every ChainList/Chain/Link needs to have assigned a __gpu and __mod.
-3. Each __call__() or forward() should have `train` as a parameter,
-   and Variables need to be set to Volatile=True during evaluation.
-4. Each __call__() or forward() should have an accompanying `check_type_forward`
-   called along the lines of:
-
-   ```
-   in_data = tuple([x.data for x in [input_1, input_2]])
-   in_types = type_check.get_types(in_data, 'in_types', False)
-   self.check_type_forward(in_types)
-   ```
-
-   This is mimicing the behavior seen in Chainer Functions.
-5. Each __call__() or forward() should have a chainer.Variable as input.
-   There may be slight exceptions to this rule, since at a times
-   especially in this model a list is preferred, but try to stick to
-   this as close as possible. When avoiding this rule, consider setting
-   a property rather than passing the variable. For instance:
-
-   ```
-   link.transitions = transitions
-   loss = link(sentences)
-   ```
-6. Each link should be made to run on GPU and CPU.
-7. Type checking should be disabled using an environment variable.
-
-"""
-
-T_SKIP   = 2
 T_SHIFT  = 0
 T_REDUCE = 1
+T_SKIP   = 2
+
 
 TINY = 1e-8
 
@@ -89,14 +58,12 @@ class SentencePairTrainer(BaseSentencePairTrainer):
 
     def init_optimizer(self, lr=0.01, **kwargs):
         self.optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
-        # self.optimizer = optimizers.SGD(lr=0.01)
         self.optimizer.setup(self.model)
-        # self.optimizer.add_hook(chainer.optimizer.GradientClipping(40))
-        # self.optimizer.add_hook(chainer.optimizer.WeightDecay(0.00003))
 
 
 class SentenceTrainer(SentencePairTrainer):
     pass
+
 
 class Tracker(Chain):
 
@@ -178,7 +145,6 @@ class SPINN(Chain):
             self.reinforce_lr = 0.01
             self.baseline = 0
             self.mu = 0.1
-            # self.transition_optimizer = optimizers.SGD(lr=self.reinforce_lr)
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
 
@@ -230,12 +196,6 @@ class SPINN(Chain):
 
     def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
             validate_transitions=True, use_random=False, use_reinforce=False):
-        # how to use:
-        # encoder.bufs = bufs, unbundled
-        # encoder.stacks = stacks, unbundled
-        # encoder.tracker.state = trackings, unbundled
-        # encoder.transitions = ExampleList of Examples, padded with n
-        # encoder.run()
         self.history = [[] for buf in self.bufs] if self.use_history is not None \
                         else itertools.repeat(None)
 
@@ -250,7 +210,6 @@ class SPINN(Chain):
                 transitions = self.transitions[:, i]
                 transition_arr = list(transitions)
             else:
-            #     transition_arr = [0]*len(self.bufs)
                 raise Exception('Running without transitions not implemented')
 
             cant_skip = np.array([t != T_SKIP for t in transitions])

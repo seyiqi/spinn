@@ -389,15 +389,11 @@ def run(only_forward=False):
             if hasattr(transition_loss, 'backward') and not FLAGS.use_reinforce:
                 total_loss += transition_loss
 
-            # [(n,w.grad) for n,w in model.namedparams()]
-
+            # Get gradients
             total_loss.backward()
 
-            try:
-                classifier_trainer.update()
-            except:
-                import ipdb; ipdb.set_trace()
-                pass
+            # Apply gradients
+            classifier_trainer.update()
 
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
