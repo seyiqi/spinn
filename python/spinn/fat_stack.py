@@ -134,8 +134,6 @@ class SPINN(Chain):
                 use_tracker_dropout=args.use_tracker_dropout,
                 tracker_dropout_rate=args.tracker_dropout_rate, use_skips=use_skips))
         self.transition_weight = args.transition_weight
-        self.use_history = args.use_history
-        self.save_stack = args.save_stack
         self.use_reinforce = use_reinforce
         self.use_skips = use_skips
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
@@ -158,12 +156,6 @@ class SPINN(Chain):
 
         # There are 2 * N - 1 transitons, so (|transitions| + 1) / 2 should equal N.
         self.buffers_n = [(len([t for t in ts if t != T_SKIP]) + 1) / 2 for ts in example.transitions]
-        for stack, buf in zip(self.stacks, self.bufs):
-            for ss in stack:
-                if self.save_stack:
-                    ss.buf = buf[:]
-                    ss.stack = stack[:]
-                    ss.tracking = None
         if hasattr(self, 'tracker'):
             self.tracker.reset_state()
         if hasattr(example, 'transitions'):
@@ -196,9 +188,6 @@ class SPINN(Chain):
 
     def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
             validate_transitions=True, use_random=False, use_reinforce=False):
-        self.history = [[] for buf in self.bufs] if self.use_history is not None \
-                        else itertools.repeat(None)
-
         transition_loss, transition_acc = 0, 0
         if hasattr(self, 'transitions'):
             num_transitions = self.transitions.shape[1]
@@ -270,24 +259,18 @@ class SPINN(Chain):
                         self.memories.append(memory)
 
             lefts, rights, trackings, attentions = [], [], [], []
-            batch = zip(transition_arr, self.bufs, self.stacks, self.history,
+            batch = zip(transition_arr, self.bufs, self.stacks,
                         self.tracker.states if hasattr(self, 'tracker') and self.tracker.h is not None
                         else itertools.repeat(None),
                         self.attention if self.attention is not None
                         else itertools.repeat(None))
 
-            for ii, (transition, buf, stack, history, tracking, attention) in enumerate(batch):
+            for ii, (transition, buf, stack, tracking, attention) in enumerate(batch):
                 must_shift = len(stack) < 2
 
                 if transition == T_SHIFT: # shift
-                    if self.save_stack:
-                        buf[-1].buf = buf[:]
-                        buf[-1].stack = stack[:]
-                        buf[-1].tracking = tracking
                     stack.append(buf.pop())
                     self.buffers_t[ii] += 1
-                    if self.use_history:
-                        history.append(stack[-1])
                 elif transition == T_REDUCE: # reduce
                     for lr in [rights, lefts]:
                         if len(stack) > 0:
@@ -296,27 +279,20 @@ class SPINN(Chain):
                             zeros = Variable(np.zeros(buf[0].shape,
                                 dtype=buf[0].data.dtype),
                                 volatile='auto')
-                            if self.save_stack:
-                                zeros.buf = buf[:]
-                                zeros.stack = stack[:]
-                                zeros.tracking = tracking
                             lr.append(zeros)
                     trackings.append(tracking)
                     attentions.append(attention)
-                else:
-                    if self.use_history:
-                        history.append(buf[-1])  # pad history so it can be stacked/transposed
+                else: # skip
+                    pass
             if len(rights) > 0:
                 reduced = iter(self.reduce(
                     lefts, rights, trackings, attentions))
-                for transition, stack, history in zip(
-                        transition_arr, self.stacks, self.history):
+                for transition, stack in zip(
+                        transition_arr, self.stacks):
                     if transition == T_REDUCE: # reduce
                         new_stack_item = next(reduced)
                         assert isinstance(new_stack_item.data, np.ndarray), "Pushing cupy array to stack"
                         stack.append(new_stack_item)
-                        if self.use_history:
-                            history.append(stack[-1])
 
         if self.transition_weight is not None:
             # We compute statistics after the fact, since sub-batches can
@@ -470,8 +446,6 @@ class BaseModel(Chain):
                  transition_weight=None,
                  use_tracking_lstm=True,
                  use_shift_composition=True,
-                 use_history=False,
-                 save_stack=False,
                  use_reinforce=False,
                  projection_dim=None,
                  encoding_dim=None,
@@ -512,8 +486,6 @@ class BaseModel(Chain):
             'size': projection_dim,
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
             'transition_weight': transition_weight,
-            'use_history': use_history,
-            'save_stack': save_stack,
             'input_dropout_rate': 1. - input_keep_rate,
             'use_input_dropout': use_input_dropout,
             'use_input_norm': use_input_norm,

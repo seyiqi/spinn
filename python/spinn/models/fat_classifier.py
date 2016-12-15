@@ -55,8 +55,6 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              transition_weight=FLAGS.transition_weight,
              use_tracking_lstm=FLAGS.use_tracking_lstm,
              use_shift_composition=FLAGS.use_shift_composition,
-             use_history=FLAGS.use_history,
-             save_stack=FLAGS.save_stack,
              use_sentence_pair=use_sentence_pair,
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
@@ -534,12 +532,10 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_shift_composition", True, "")
-    gflags.DEFINE_boolean("use_history", False, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
     gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the RHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
                                                         "that give a valid parse tree.")
-    gflags.DEFINE_boolean("save_stack", False, "")
     gflags.DEFINE_boolean("use_tracking_lstm", True,
                           "Whether to use LSTM in the tracking unit")
     gflags.DEFINE_float("semantic_classifier_keep_rate", 0.9,
