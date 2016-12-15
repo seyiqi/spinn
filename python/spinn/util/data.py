@@ -185,7 +185,7 @@ def MakeTrainingIterator(sources, batch_size, smart_batches=True, use_peano=True
             key = peano(prem_len, hyp_len)
             return key
         else:
-            if not isinstance(num_transitions, list):
+            if not hasattr(num_transitions, '__len__'):
                 num_transitions = [num_transitions]
             return max(num_transitions)
 
