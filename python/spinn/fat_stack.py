@@ -124,9 +124,9 @@ class Tracker(Chain):
 class SPINN(Chain):
 
     def __init__(self, args, vocab, normalization=L.BatchNormalization,
-                 attention=False, attn_fn=None, use_reinforce=True, use_skips=False):
+                 use_reinforce=True, use_skips=False):
         super(SPINN, self).__init__(
-            reduce=Reduce(args.size, args.tracker_size, attention, attn_fn))
+            reduce=Reduce(args.size, args.tracker_size))
         if args.tracker_size is not None:
             self.add_link('tracker', Tracker(
                 args.size, args.tracker_size,
@@ -146,7 +146,7 @@ class SPINN(Chain):
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
 
-    def __call__(self, example, attention=None, print_transitions=False, use_internal_parser=False,
+    def __call__(self, example, print_transitions=False, use_internal_parser=False,
                  validate_transitions=True, use_random=False, use_reinforce=False):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
@@ -160,7 +160,6 @@ class SPINN(Chain):
             self.tracker.reset_state()
         if hasattr(example, 'transitions'):
             self.transitions = example.transitions
-        self.attention = attention
         return self.run(run_internal_parser=True,
                         use_internal_parser=use_internal_parser,
                         validate_transitions=validate_transitions,
@@ -258,14 +257,12 @@ class SPINN(Chain):
 
                         self.memories.append(memory)
 
-            lefts, rights, trackings, attentions = [], [], [], []
+            lefts, rights, trackings = [], [], []
             batch = zip(transition_arr, self.bufs, self.stacks,
                         self.tracker.states if hasattr(self, 'tracker') and self.tracker.h is not None
-                        else itertools.repeat(None),
-                        self.attention if self.attention is not None
                         else itertools.repeat(None))
 
-            for ii, (transition, buf, stack, tracking, attention) in enumerate(batch):
+            for ii, (transition, buf, stack, tracking) in enumerate(batch):
                 must_shift = len(stack) < 2
 
                 if transition == T_SHIFT: # shift
@@ -281,12 +278,11 @@ class SPINN(Chain):
                                 volatile='auto')
                             lr.append(zeros)
                     trackings.append(tracking)
-                    attentions.append(attention)
                 else: # skip
                     pass
             if len(rights) > 0:
                 reduced = iter(self.reduce(
-                    lefts, rights, trackings, attentions))
+                    lefts, rights, trackings))
                 for transition, stack in zip(
                         transition_arr, self.stacks):
                     if transition == T_REDUCE: # reduce
@@ -508,7 +504,7 @@ class BaseModel(Chain):
                         ))
 
         self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
-                 attention=False, attn_fn=None, use_reinforce=use_reinforce, use_skips=use_skips))
+                 use_reinforce=use_reinforce, use_skips=use_skips))
 
         if self.use_encode:
             # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather
