@@ -1,24 +1,3 @@
-"""From the project root directory (containing data files), this can be run with:
-
-Boolean logic evaluation:
-python -m spinn.models.fat_classifier --training_data_path ../bl-data/pbl_train.tsv \
-       --eval_data_path ../bl-data/pbl_dev.tsv
-
-SST sentiment (Demo only, model needs a full GloVe embeddings file to do well):
-python -m spinn.models.fat_classifier --data_type sst --training_data_path sst-data/train.txt \
-       --eval_data_path sst-data/dev.txt --embedding_data_path spinn/tests/test_embedding_matrix.5d.txt \
-       --model_dim 10 --word_embedding_dim 5
-
-SNLI entailment (Demo only, model needs a full GloVe embeddings file to do well):
-python -m spinn.models.fat_classifier --data_type snli --training_data_path snli_1.0/snli_1.0_dev.jsonl \
-       --eval_data_path snli_1.0/snli_1.0_dev.jsonl --embedding_data_path spinn/tests/test_embedding_matrix.5d.txt \
-       --model_dim 10 --word_embedding_dim 5
-
-Note: If you get an error starting with "TypeError: ('Wrong number of dimensions..." during development,
-    there may already be a saved checkpoint in ckpt_path that matches the name of the model you're developing.
-    Move or delete it as appropriate.
-"""
-
 from functools import partial
 import os
 import pprint
@@ -489,7 +468,7 @@ if __name__ == '__main__':
     gflags.DEFINE_string("experiment_name", "", "")
 
     # Data types.
-    gflags.DEFINE_enum("data_type", "bl", ["bl", "sst", "snli", "arithmetic"],
+    gflags.DEFINE_enum("data_type", "snli", ["bl", "sst", "snli", "arithmetic"],
         "Which data handler and classifier to use.")
 
     # Where to store checkpoints
@@ -518,7 +497,7 @@ if __name__ == '__main__':
         "If set, load GloVe-formatted embeddings from here.")
 
     # Model architecture settings.
-    gflags.DEFINE_enum("model_type", "RNN",
+    gflags.DEFINE_enum("model_type", "CBOW",
                        ["CBOW", "RNN", "SPINN", "NTI"],
                        "")
     gflags.DEFINE_boolean("allow_gt_transitions_in_eval", False,
