@@ -6,6 +6,7 @@ import os
 from spinn import util
 from spinn.data.snli import load_snli_data
 from spinn.data.sst import load_sst_data
+from spinn.data.arithmetic import load_simple_data
 from collections import Counter
 
 
@@ -31,6 +32,7 @@ from the sentence padding token). Transitions are padded on the left.
 
 snli_data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "test_snli.jsonl")
 sst_data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "test_sst.txt")
+arithmetic_data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "test_simple.tsv")
 embedding_data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "test_embedding_matrix.5d.txt")
 word_embedding_dim = 5
 
@@ -74,12 +76,15 @@ def s_is_left_padded(s):
 
 
 def s_is_left_to_right(s, EOS_TOKEN):
+    if not isinstance(EOS_TOKEN, list):
+        EOS_TOKEN = [EOS_TOKEN]
+
     for w in s:
         if w == util.SENTENCE_PADDING_SYMBOL:
             continue
 
         # TODO: What about single token sentence? This is probably good enough for now.
-        if w == EOS_TOKEN:
+        if w in EOS_TOKEN:
             # If the first symbol is an EOS, then the sentence is reversed.
             return False
         else:
@@ -88,6 +93,7 @@ def s_is_left_to_right(s, EOS_TOKEN):
     # Hypothetically, is possible to have all padding.
     # That being said, this should never happen, so return False.
     return False
+
         
 class DataTestCase(unittest.TestCase):
 
@@ -230,6 +236,56 @@ class SSTTestCase(unittest.TestCase):
             # The sentences should be padded on the right.
             assert not s_is_left_padded(s)
             
+            # The num_transitions should count non-skip transitions
+            assert len([x for x in ts if x != util.SKIP_SYMBOL]) == num_t
+
+            # The transitions should start with SKIP and end with REDUCE (ignoring SKIPs).
+            assert t_is_left_to_right(ts)
+
+            # The transitions should be padded on the left.
+            assert t_is_left_padded(ts)
+
+
+class ArithmeticTestCase(unittest.TestCase):
+
+    def test_load(self):
+        # NOTE: Arithmetic tsv file uses a tab between label and example.
+        data_manager = load_simple_data
+        raw_data, _ = data_manager.load_data(arithmetic_data_path)
+        assert len(raw_data) == 20
+
+        seq_lengths = Counter([len(x['transitions']) for x in raw_data])
+        assert seq_lengths == {5: 12, 9: 4, 13: 3, 17: 1}
+
+    def test_preprocess(self):
+        seq_length = 10
+        for_rnn = False
+        use_left_padding = True
+
+        data_manager = load_simple_data
+        raw_data, vocabulary = data_manager.load_data(arithmetic_data_path)
+
+        OPERATOR_TOKENS = [vocabulary["+"], vocabulary["-"]]
+
+        data = util.PreprocessDataset(
+            raw_data, vocabulary, seq_length, data_manager, eval_mode=False, logger=MockLogger(),
+            sentence_pair_data=data_manager.SENTENCE_PAIR_DATA,
+            for_rnn=for_rnn, use_left_padding=use_left_padding)
+
+        tokens, transitions, labels, num_transitions = data
+
+        # Filter pairs that don't have both hyp and prem transition length <= seq_length
+        assert tokens.shape == (16, seq_length)
+        assert transitions.shape == (16, seq_length)
+
+        for s, ts, num_t in zip(tokens, transitions, num_transitions):
+
+            # The sentence should begin with an operator.
+            assert any(s[0] == tkn for tkn in OPERATOR_TOKENS)
+
+            # The sentences should be padded on the right.
+            assert not s_is_left_padded(s)
+
             # The num_transitions should count non-skip transitions
             assert len([x for x in ts if x != util.SKIP_SYMBOL]) == num_t
 
