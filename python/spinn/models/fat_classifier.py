@@ -344,10 +344,11 @@ def run(only_forward=False):
                 total_weights = sum([prod(w.shape) for w in model.params()])
                 logger.Log("Total Weights: {}".format(total_weights))
 
-            preds = [m["preds_cm"] for m in model.spinn.memories]
-            truth = [m["truth_cm"] for m in model.spinn.memories]
-            accum_preds.append(preds)
-            accum_truth.append(truth)
+            if transition_loss is not None:
+                preds = [m["preds_cm"] for m in model.spinn.memories]
+                truth = [m["truth_cm"] for m in model.spinn.memories]
+                accum_preds.append(preds)
+                accum_truth.append(truth)
 
             # Boilerplate for calculating loss.
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
