@@ -26,7 +26,7 @@ from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
 from spinn.util.chainer_blocks import LSTMState, Embed
 from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
-from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm
+from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm, expand_along
 from sklearn import metrics
 
 """
@@ -72,9 +72,6 @@ def HeKaimingInit(shape, real_shape=None):
 
     return np.random.normal(scale=np.sqrt(4.0/(fan[0] + fan[1])),
                             size=shape)
-
-def expandAlong(rewards, tr_mask):
-    return np.extract(tr_mask.T, np.tile(rewards, (tr_mask.shape[1], 1)))
 
 
 class SentencePairTrainer(BaseSentencePairTrainer):
@@ -401,7 +398,7 @@ class SPINN(Chain):
 
         hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
         # Expand rewards
-        rewards = expandAlong(rewards, self.transition_mask)
+        rewards = expand_along(rewards, self.transition_mask)
 
         transition_loss = batch_weighted_softmax_cross_entropy(
             hyp_xent, truth_xent.astype(np.int32), rewards - self.baseline,
