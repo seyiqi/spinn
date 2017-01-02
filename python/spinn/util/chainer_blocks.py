@@ -17,6 +17,12 @@ from chainer import testing
 from chainer.utils import type_check
 
 
+def expand_along(rewards, tr_mask):
+    mask = tr_mask.flatten()
+    tiled_rewards = np.tile(rewards, (tr_mask.shape[1], 1)).T.flatten()
+    return np.extract(mask, tiled_rewards)
+
+
 def gradient_check(model, get_loss, rtol=0, atol=1e-2, to_check=10):
     epsilon = 1e-3
     cached_grads = [w.grad.ravel().copy() for (n,w) in model.namedparams()]
