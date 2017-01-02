@@ -153,8 +153,6 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
     return acc_accum / eval_batches
 
 
-
-
 def run(only_forward=False):
     logger = afs_safe_logger.Logger(os.path.join(FLAGS.log_path, FLAGS.experiment_name) + ".log")
 
@@ -314,6 +312,8 @@ def run(only_forward=False):
 
         # New Training Loop
         progress_bar = SimpleProgressBar(msg="Training", bar_length=60, enabled=FLAGS.show_progress_bar)
+        accum_class_preds = deque(maxlen=FLAGS.deq_length)
+        accum_class_truth = deque(maxlen=FLAGS.deq_length)
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
@@ -334,6 +334,9 @@ def run(only_forward=False):
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
+            accum_class_preds.append(y.data.argmax(axis=1))
+            accum_class_truth.append(y_batch)
+
             if not printed_total_weights:
                 printed_total_weights = True
                 def prod(l):
@@ -341,12 +344,10 @@ def run(only_forward=False):
                 total_weights = sum([prod(w.shape) for w in model.params()])
                 logger.Log("Total Weights: {}".format(total_weights))
 
-            # Accumulate stats for confusion matrix.
-            if FLAGS.print_confusion_matrix:
-                preds = [m["preds_cm"] for m in model.spinn.memories]
-                truth = [m["truth_cm"] for m in model.spinn.memories]
-                accum_preds.append(preds)
-                accum_truth.append(truth)
+            preds = [m["preds_cm"] for m in model.spinn.memories]
+            truth = [m["truth_cm"] for m in model.spinn.memories]
+            accum_preds.append(preds)
+            accum_truth.append(truth)
 
             # Boilerplate for calculating loss.
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
@@ -410,14 +411,24 @@ def run(only_forward=False):
                 logger.Log(
                     "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
                     % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
-                if FLAGS.print_confusion_matrix:
+                if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
                         np.array(all_preds),
                         np.array(all_truth),
                         )
-                    logger.Log("{}".format(cm))
-                    cm = cm.astype(np.float32) / cm.sum(axis=1)[:, np.newaxis]
-                    logger.Log("{}".format(cm))
+                    logger.Log("Transitions Confusion Matrix\n{}".format(cm))
+                if FLAGS.class_confusion_matrix:
+                    np.set_printoptions(threshold=np.nan)
+                    np.set_printoptions(linewidth=np.nan)
+                    all_class_preds = flatten(accum_class_preds)
+                    all_class_truth = flatten(accum_class_truth)
+                    cm = metrics.confusion_matrix(
+                        np.array(all_class_preds),
+                        np.array(all_class_truth),
+                        )
+                    logger.Log("Class Confusion Matrix\n{}".format(cm[:]))
+                accum_class_preds.clear()
+                accum_class_truth.clear()
                 accum_class_acc.clear()
                 accum_preds.clear()
                 accum_truth.clear()
@@ -452,7 +463,8 @@ def run(only_forward=False):
 if __name__ == '__main__':
     # Debug settings.
     gflags.DEFINE_bool("debug", False, "Set to True to disable debug_mode and type_checking.")
-    gflags.DEFINE_bool("print_confusion_matrix", False, "Periodically print CM on transitions.")
+    gflags.DEFINE_bool("transitions_confusion_matrix", False, "Periodically print CM on transitions.")
+    gflags.DEFINE_bool("class_confusion_matrix", False, "Periodically print CM on classes.")
     gflags.DEFINE_bool("gradient_check", False, "Randomly check that gradients match estimates.")
     gflags.DEFINE_bool("profile", False, "Set to True to quit after a few batches.")
     gflags.DEFINE_bool("write_summaries", False, "Toggle which controls whether summaries are written.")
