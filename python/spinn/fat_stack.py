@@ -27,6 +27,7 @@ from spinn.util.chainer_blocks import LSTMState, Embed
 from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm, expand_along
+from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
 """
@@ -386,6 +387,35 @@ class SPINN(Chain):
 
 
     def reinforce(self, rewards):
+        """ The tricky step here is when we "expand rewards".
+
+            Say we have batch size 2, with these actions, log_probs, and rewards:
+
+            actions = [[0, 1], [1, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+
+            Then we want to calculate the objective as so:
+
+            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
+
+            Now this gets slightly tricker when using skips (action==2):
+
+            actions = [[0, 1], [2, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
+
+            NOTE: The above example is fictional, and although those values are
+            not achievable, is still representative of what is going on.
+
+        """
         statistics = zip(*[
             (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
             for m in self.memories])
@@ -397,16 +427,21 @@ class SPINN(Chain):
             for s in statistics]
 
         hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
-        # Expand rewards
-        rewards = expand_along(rewards, self.transition_mask)
 
-        transition_loss = batch_weighted_softmax_cross_entropy(
-            hyp_xent, truth_xent.astype(np.int32), rewards - self.baseline,
-            normalize=False)
+        self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards.data)
+        new_rewards = rewards - self.baseline
+        log_p = F.log(F.softmax(hyp_xent))
+        p_preds = F.select_item(log_p, truth_xent)
+
+        # Expand rewards
+        if self.use_skips:
+            new_rewards = expand_along(new_rewards, np.full(self.transition_mask.shape, True))
+        else:
+            new_rewards = expand_along(new_rewards, self.transition_mask)
 
         self.transition_optimizer.zero_grads()
-        self.baseline = self.baseline*(1-self.mu) + self.mu*np.mean(rewards)
 
+        transition_loss = F.sum(-1. * p_preds * new_rewards) / p_preds.shape[0]
         transition_loss.backward()
         transition_loss.unchain_backward()
 
@@ -620,7 +655,10 @@ class BaseModel(Chain):
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
 
         if self.use_reinforce:
-            rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
+            # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
+            rewards = F.concat([F.expand_dims(
+                        F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]), axis=0)
+                        for i in range(y_batch.shape[0])], axis=0)
             self.spinn.reinforce(rewards)
 
         if hasattr(transition_acc, 'data'):

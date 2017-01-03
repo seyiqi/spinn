@@ -18,9 +18,14 @@ from chainer.utils import type_check
 
 
 def expand_along(rewards, tr_mask):
-    mask = tr_mask.flatten()
-    tiled_rewards = np.tile(rewards, (tr_mask.shape[1], 1)).T.flatten()
-    return np.extract(mask, tiled_rewards)
+    assert isinstance(rewards, Variable)
+    mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[1]), (tr_mask.shape[1], 1)).T)
+    tiled_rewards = F.tile(rewards, (mask.shape[0], 1))
+    return F.select_item(tiled_rewards, mask)
+
+
+def var_mean(x, axis=0):
+    return F.sum(x) / x.shape[axis]
 
 
 def gradient_check(model, get_loss, rtol=0, atol=1e-2, to_check=10):
