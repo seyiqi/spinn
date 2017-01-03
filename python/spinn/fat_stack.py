@@ -67,6 +67,8 @@ T_SKIP   = 2
 T_SHIFT  = 0
 T_REDUCE = 1
 
+TINY = 1e-8
+
 def HeKaimingInit(shape, real_shape=None):
     # Calculate fan-in / fan-out using real shape if given as override
     fan = real_shape or shape
@@ -442,6 +444,7 @@ class SPINN(Chain):
         self.transition_optimizer.zero_grads()
 
         transition_loss = F.sum(-1. * p_preds * new_rewards) / p_preds.shape[0]
+        transition_loss += TINY
         transition_loss.backward()
         transition_loss.unchain_backward()
 
@@ -654,7 +657,7 @@ class BaseModel(Chain):
         accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
 
-        if self.use_reinforce:
+        if train and self.use_reinforce:
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
             rewards = F.concat([F.expand_dims(
                         F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]), axis=0)
