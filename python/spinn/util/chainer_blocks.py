@@ -19,7 +19,7 @@ from chainer.utils import type_check
 
 def expand_along(rewards, tr_mask):
     assert isinstance(rewards, Variable)
-    mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[1]), (tr_mask.shape[1], 1)).T)
+    mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[0]), (tr_mask.shape[1], 1)).T)
     tiled_rewards = F.tile(rewards, (mask.shape[0], 1))
     return F.select_item(tiled_rewards, mask)
 
