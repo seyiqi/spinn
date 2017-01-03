@@ -21,7 +21,6 @@ from chainer.training import extensions
 from chainer.functions.activation import slstm
 from chainer.utils import type_check
 from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
-from spinn.util.tensor_softmax_cross_entropy import tensor_softmax_cross_entropy
 
 from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
 from spinn.util.chainer_blocks import LSTMState, Embed
@@ -388,6 +387,35 @@ class SPINN(Chain):
 
 
     def reinforce(self, rewards):
+        """ The tricky step here is when we "expand rewards".
+
+            Say we have batch size 2, with these actions, log_probs, and rewards:
+
+            actions = [[0, 1], [1, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+
+            Then we want to calculate the objective as so:
+
+            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
+
+            Now this gets slightly tricker when using skips (action==2):
+
+            actions = [[0, 1], [2, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
+
+            NOTE: The above example is fictional, and although those values are
+            not achievable, is still representative of what is going on.
+
+        """
         statistics = zip(*[
             (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
             for m in self.memories])
