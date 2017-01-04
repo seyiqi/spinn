@@ -362,17 +362,7 @@ class SPINN(Chain):
         if self.transition_weight is not None:
             # We compute statistics after the fact, since sub-batches can
             # have different sizes when not using skips.
-            statistics = zip(*[
-                (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
-                for m in self.memories])
-
-            statistics = [
-                F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
-                if isinstance(s[0], Variable) else
-                np.array(reduce(lambda x, y: x + y.tolist(), s, []))
-                for s in statistics]
-
-            hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+            hyp_acc, truth_acc, hyp_xent, truth_xent = self.get_statistics()
 
             transition_acc = F.accuracy(
                 hyp_acc, truth_acc.astype(np.int32))
@@ -388,6 +378,21 @@ class SPINN(Chain):
             transition_loss = None
 
         return [stack[-1] for stack in self.stacks], transition_loss
+
+
+    def get_statistics(self):
+        statistics = zip(*[
+            (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
+            for m in self.memories])
+
+        statistics = [
+            F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
+            if isinstance(s[0], Variable) else
+            np.array(reduce(lambda x, y: x + y.tolist(), s, []))
+            for s in statistics]
+
+        hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+        return hyp_acc, truth_acc, hyp_xent, truth_xent
 
 
     def reinforce(self, rewards):
@@ -420,17 +425,7 @@ class SPINN(Chain):
             not achievable, is still representative of what is going on.
 
         """
-        statistics = zip(*[
-            (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
-            for m in self.memories])
-
-        statistics = [
-            F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
-            if isinstance(s[0], Variable) else
-            np.array(reduce(lambda x, y: x + y.tolist(), s, []))
-            for s in statistics]
-
-        hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+        hyp_acc, truth_acc, hyp_xent, truth_xent = self.get_statistics()
 
         self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards.data)
         new_rewards = rewards - self.baseline
