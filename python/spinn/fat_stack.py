@@ -182,8 +182,8 @@ class SPINN(Chain):
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
 
-    def __call__(self, example, attention=None, print_transitions=False,
-                 use_internal_parser=False, validate_transitions=True, use_random=False):
+    def __call__(self, example, attention=None, print_transitions=False, use_internal_parser=False,
+                 validate_transitions=True, use_random=False, use_reinforce=False):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
         self.buffers_t = [0 for buf in self.bufs]
@@ -206,7 +206,9 @@ class SPINN(Chain):
         return self.run(run_internal_parser=True,
                         use_internal_parser=use_internal_parser,
                         validate_transitions=validate_transitions,
-                        use_random=use_random)
+                        use_random=use_random,
+                        use_reinforce=use_reinforce,
+                        )
 
     def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
         DEFAULT_CHOICE = T_SHIFT
@@ -226,8 +228,8 @@ class SPINN(Chain):
 
         return preds
 
-    def run(self, print_transitions=False, run_internal_parser=False,
-            use_internal_parser=False, validate_transitions=True, use_random=False):
+    def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
+            validate_transitions=True, use_random=False, use_reinforce=False):
         # how to use:
         # encoder.bufs = bufs, unbundled
         # encoder.stacks = stacks, unbundled
@@ -260,7 +262,7 @@ class SPINN(Chain):
                         memory = {}
                         truth_acc = transitions
                         hyp_xent = transition_hyp
-                        if self.use_reinforce:
+                        if use_reinforce:
                             probas = F.softmax(transition_hyp)
                             samples = np.array([T_SKIP for _ in self.bufs], dtype=np.int32)
                             samples[cant_skip] = [np.random.choice(self.choices, 1, p=proba)[0] for proba in probas.data[cant_skip]]
@@ -613,7 +615,7 @@ class BaseModel(Chain):
 
 
     def run_spinn(self, example, train, use_internal_parser,
-                  validate_transitions=True, use_random=False):
+                  validate_transitions=True, use_random=False, use_reinforce=False):
         r = reporter.Reporter()
         r.add_observer('spinn', self.spinn)
         observation = {}
@@ -621,7 +623,9 @@ class BaseModel(Chain):
             h_both, _ = self.spinn(example,
                                    use_internal_parser=use_internal_parser,
                                    validate_transitions=validate_transitions,
-                                   use_random=use_random)
+                                   use_random=use_random,
+                                   use_reinforce=use_reinforce,
+                                   )
 
         transition_acc = observation.get('spinn/transition_accuracy', 0.0)
         transition_loss = observation.get('spinn/transition_loss', None)
@@ -644,20 +648,21 @@ class BaseModel(Chain):
         return y
 
 
-    def __call__(self, sentences, transitions, y_batch=None, train=True,
+    def __call__(self, sentences, transitions, y_batch=None, train=True, use_reinforce=False,
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         example = self.build_example(sentences, transitions, train)
         assert example.tokens.data.min() >= 0
         assert y_batch.min() >= 0
         example = self.run_embed(example, train)
-        h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser, validate_transitions, use_random)
+        h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser,
+            validate_transitions, use_random, use_reinforce=use_reinforce)
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
         accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
 
-        if train and self.use_reinforce:
+        if train and use_reinforce:
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
             rewards = F.concat([F.expand_dims(
                         F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]), axis=0)
@@ -695,9 +700,9 @@ class SentencePairModel(BaseModel):
         return example
 
 
-    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False):
+    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False, use_reinforce=False):
         h_both, transition_acc, transition_loss = super(SentencePairModel, self).run_spinn(
-            example, train, use_internal_parser, validate_transitions, use_random)
+            example, train, use_internal_parser, validate_transitions, use_random, use_reinforce=use_reinforce)
         batch_size = len(h_both) / 2
         h_premise = F.concat(h_both[:batch_size], axis=0)
         h_hypothesis = F.concat(h_both[batch_size:], axis=0)
@@ -724,8 +729,8 @@ class SentenceModel(BaseModel):
         return example
 
 
-    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False):
+    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False, use_reinforce=False):
         h, transition_acc, transition_loss = super(SentenceModel, self).run_spinn(
-            example, train, use_internal_parser, validate_transitions, use_random)
+            example, train, use_internal_parser, validate_transitions, use_random, use_reinforce=use_reinforce)
         h = F.concat(h, axis=0)
         return h, transition_acc, transition_loss

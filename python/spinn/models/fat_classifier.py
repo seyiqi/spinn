@@ -105,6 +105,7 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 "transitions": eval_transitions_batch,
                 }, eval_y_batch, train=False, predict=False,
                 use_internal_parser=use_internal_parser,
+                use_reinforce=False,
                 validate_transitions=FLAGS.validate_transitions,
                 use_random=FLAGS.use_random)
             y, loss, class_loss, transition_acc, transition_loss = ret
@@ -331,6 +332,7 @@ def run(only_forward=False):
                 }, y_batch, train=True, predict=False,
                     validate_transitions=FLAGS.validate_transitions,
                     use_internal_parser=FLAGS.use_internal_parser,
+                    use_reinforce=FLAGS.use_reinforce,
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
@@ -374,15 +376,6 @@ def run(only_forward=False):
             # [(n,w.grad) for n,w in model.namedparams()]
 
             total_loss.backward()
-
-            if FLAGS.gradient_check:
-                def get_loss():
-                    _, check_loss, _, _ = classifier_trainer.forward({
-                    "sentences": X_batch,
-                    "transitions": transitions_batch,
-                    }, y_batch, train=True, predict=False)
-                    return check_loss
-                gradient_check(classifier_trainer.model, get_loss)
 
             try:
                 classifier_trainer.update()
