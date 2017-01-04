@@ -375,15 +375,6 @@ def run(only_forward=False):
 
             total_loss.backward()
 
-            if FLAGS.gradient_check:
-                def get_loss():
-                    _, check_loss, _, _ = classifier_trainer.forward({
-                    "sentences": X_batch,
-                    "transitions": transitions_batch,
-                    }, y_batch, train=True, predict=False)
-                    return check_loss
-                gradient_check(classifier_trainer.model, get_loss)
-
             try:
                 classifier_trainer.update()
             except:
