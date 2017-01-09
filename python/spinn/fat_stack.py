@@ -432,6 +432,12 @@ class SPINN(Chain):
         log_p = F.log_softmax(hyp_xent)
         log_p_preds = F.select_item(log_p, truth_xent)
 
+        if self.transition_mask.shape[0] == new_rewards.shape[0] * 2:
+            # Handles the case of SNLI where each reward is used for two sentences.
+            new_rewards = np.concatenate([new_rewards, new_rewards], axis=0)
+        else:
+            assert self.transition_mask.shape[0] == new_rewards.shape[0]
+
         # Expand rewards
         if self.use_skips:
             new_rewards = expand_along(new_rewards, np.full(self.transition_mask.shape, True))
