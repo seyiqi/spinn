@@ -97,6 +97,9 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
         with open(summaries_file, "w") as f:
             f.write("id,hamming,gold,pred\n")
 
+    accum_preds = deque()
+    accum_truth = deque()
+    model = classifier_trainer.optimizer.target
     for i, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in enumerate(eval_set[1]):
         # Calculate Local Accuracies
         if eval_data_limit == -1 or i < eval_data_limit:
@@ -110,13 +113,17 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 use_random=FLAGS.use_random)
             y, loss, class_loss, transition_acc, transition_loss = ret
             acc_value = float(classifier_trainer.model.accuracy.data)
-            action_acc_value = transition_acc
+
+            if transition_loss is not None:
+                preds = [m["preds_cm"] for m in model.spinn.memories]
+                truth = [m["truth_cm"] for m in model.spinn.memories]
+                accum_preds.append(preds)
+                accum_truth.append(truth)
         else:
             break
 
         # Update Aggregate Accuracies
         acc_accum += acc_value
-        action_acc_accum += action_acc_value
         eval_batches += 1.0
 
         if FLAGS.print_tree:
@@ -149,8 +156,17 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
         # Print Progress
         progress_bar.step(i+1, total=total_batches)
     progress_bar.finish()
+
+    # Accumulate Action Accuracy this way because of the UseSkips/NoUseSkips toggle.
+    all_preds = flatten(accum_preds)
+    all_truth = flatten(accum_truth)
+    if transition_loss is not None:
+        trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
+    else:
+        trans_acc = 0.0
+
     logger.Log("Step: %i\tEval acc: %f\t %f\t%s" %
-              (step, acc_accum / eval_batches, action_acc_accum / eval_batches, eval_set[0]))
+              (step, acc_accum / eval_batches, trans_acc, eval_set[0]))
     return acc_accum / eval_batches
 
 
