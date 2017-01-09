@@ -87,7 +87,7 @@ def convert_to_sexpr(prefix_seq):
 
 
 if __name__ == '__main__':
-    length = 11 if len(sys.argv) < 2 else int(sys.argv[1])
+    length = 5 if len(sys.argv) < 2 else int(sys.argv[1])
 
     for result, seq in generate_prefix_seqs(length):
         print "%i\t%s" % (result, " ".join(convert_to_sexpr(seq)))
