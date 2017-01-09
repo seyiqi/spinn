@@ -1,5 +1,6 @@
 import numpy as np
 import random
+import six
 
 # Chainer imports
 import chainer
@@ -18,10 +19,11 @@ from chainer.utils import type_check
 
 
 def expand_along(rewards, tr_mask):
-    assert isinstance(rewards, Variable)
+    assert isinstance(rewards, np.ndarray)
     mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[0]), (tr_mask.shape[1], 1)).T)
-    tiled_rewards = F.tile(rewards, (mask.shape[0], 1))
-    return F.select_item(tiled_rewards, mask)
+    tiled_rewards = np.tile(rewards, (mask.shape[0], 1))
+    ret = tiled_rewards[six.moves.range(mask.size), mask]
+    return ret
 
 
 def var_mean(x, axis=0):

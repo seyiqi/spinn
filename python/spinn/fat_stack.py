@@ -362,17 +362,7 @@ class SPINN(Chain):
         if self.transition_weight is not None:
             # We compute statistics after the fact, since sub-batches can
             # have different sizes when not using skips.
-            statistics = zip(*[
-                (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
-                for m in self.memories])
-
-            statistics = [
-                F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
-                if isinstance(s[0], Variable) else
-                np.array(reduce(lambda x, y: x + y.tolist(), s, []))
-                for s in statistics]
-
-            hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+            hyp_acc, truth_acc, hyp_xent, truth_xent = self.get_statistics()
 
             transition_acc = F.accuracy(
                 hyp_acc, truth_acc.astype(np.int32))
@@ -388,6 +378,21 @@ class SPINN(Chain):
             transition_loss = None
 
         return [stack[-1] for stack in self.stacks], transition_loss
+
+
+    def get_statistics(self):
+        statistics = zip(*[
+            (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
+            for m in self.memories])
+
+        statistics = [
+            F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
+            if isinstance(s[0], Variable) else
+            np.array(reduce(lambda x, y: x + y.tolist(), s, []))
+            for s in statistics]
+
+        hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
+        return hyp_acc, truth_acc, hyp_xent, truth_xent
 
 
     def reinforce(self, rewards):
@@ -420,22 +425,18 @@ class SPINN(Chain):
             not achievable, is still representative of what is going on.
 
         """
-        statistics = zip(*[
-            (m["hyp_acc"], m["truth_acc"], m["hyp_xent"], m["truth_xent"])
-            for m in self.memories])
+        hyp_acc, truth_acc, hyp_xent, truth_xent = self.get_statistics()
 
-        statistics = [
-            F.squeeze(F.concat([F.expand_dims(ss, 1) for ss in s], axis=0))
-            if isinstance(s[0], Variable) else
-            np.array(reduce(lambda x, y: x + y.tolist(), s, []))
-            for s in statistics]
-
-        hyp_acc, truth_acc, hyp_xent, truth_xent = statistics
-
-        self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards.data)
+        self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
         new_rewards = rewards - self.baseline
-        log_p = F.log(F.softmax(hyp_xent))
-        p_preds = F.select_item(log_p, truth_xent)
+        log_p = F.log_softmax(hyp_xent)
+        log_p_preds = F.select_item(log_p, truth_xent)
+
+        if self.transition_mask.shape[0] == new_rewards.shape[0] * 2:
+            # Handles the case of SNLI where each reward is used for two sentences.
+            new_rewards = np.concatenate([new_rewards, new_rewards], axis=0)
+        else:
+            assert self.transition_mask.shape[0] == new_rewards.shape[0]
 
         # Expand rewards
         if self.use_skips:
@@ -445,7 +446,7 @@ class SPINN(Chain):
 
         self.transition_optimizer.zero_grads()
 
-        transition_loss = F.sum(-1. * p_preds * new_rewards) / p_preds.shape[0]
+        transition_loss = F.sum(-1. * log_p_preds * new_rewards) / log_p_preds.shape[0]
         transition_loss += TINY
         transition_loss.backward()
         transition_loss.unchain_backward()
@@ -663,16 +664,28 @@ class BaseModel(Chain):
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
 
         if train and use_reinforce:
+            # TODO (Alex): Why would this have needed to be negative?
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
-            rewards = F.concat([F.expand_dims(
-                        F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]), axis=0)
-                        for i in range(y_batch.shape[0])], axis=0)
+            rewards = self.build_rewards(y, y_batch)
             self.spinn.reinforce(rewards)
 
         if hasattr(transition_acc, 'data'):
           transition_acc = transition_acc.data
 
         return y, accum_loss, self.accuracy.data, transition_acc, transition_loss
+
+
+    def build_rewards(self, logits, y, style="zero-one"):
+        if style == "xent":
+            rewards = F.concat([F.expand_dims(
+                        F.softmax_cross_entropy(logits[i:(i+1)], y[i:(i+1)]), axis=0)
+                        for i in range(y.shape[0])], axis=0).data
+        elif style == "zero-one":
+            rewards = (F.argmax(logits, axis=1).data == y).astype(np.float32)
+        else:
+            raise Exception("Not implemented")
+        return rewards
+
 
 class SentencePairModel(BaseModel):
     def build_example(self, sentences, transitions, train):
