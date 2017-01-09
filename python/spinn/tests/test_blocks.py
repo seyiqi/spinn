@@ -28,9 +28,9 @@ import spinn.util.chainer_blocks as blocks
 class BlocksTestCase(unittest.TestCase):
 
     def test_expand_along(self):
-        mock_rewards = Variable(np.array([1.0, 0.0, 2.0]))
+        mock_rewards = np.array([1.0, 0.0, 2.0])
         mock_mask = np.array([[True, True], [False, True], [False, False]])
-        ret = blocks.expand_along(mock_rewards, mock_mask).data
+        ret = blocks.expand_along(mock_rewards, mock_mask)
         expected = [1., 1., 0.]
         assert len(ret) == len(expected)
         assert all(r == e for r, e in zip(ret, expected))
