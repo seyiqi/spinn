@@ -48,10 +48,7 @@ class SentencePairTrainer(BaseSentencePairTrainer):
 
     def init_optimizer(self, lr=0.01, **kwargs):
         self.optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
-        # self.optimizer = optimizers.SGD(lr=0.01)
         self.optimizer.setup(self.model)
-        # self.optimizer.add_hook(chainer.optimizer.GradientClipping(40))
-        # self.optimizer.add_hook(chainer.optimizer.WeightDecay(0.00003))
 
 
 class SentenceTrainer(SentencePairTrainer):

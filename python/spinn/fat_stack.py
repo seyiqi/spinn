@@ -30,42 +30,11 @@ from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu,
 from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
-"""
-Style Guide:
 
-1. Each __call__() or forward() should be documented with its
-   input and output types/dimensions.
-2. Every ChainList/Chain/Link needs to have assigned a __gpu and __mod.
-3. Each __call__() or forward() should have `train` as a parameter,
-   and Variables need to be set to Volatile=True during evaluation.
-4. Each __call__() or forward() should have an accompanying `check_type_forward`
-   called along the lines of:
-
-   ```
-   in_data = tuple([x.data for x in [input_1, input_2]])
-   in_types = type_check.get_types(in_data, 'in_types', False)
-   self.check_type_forward(in_types)
-   ```
-
-   This is mimicing the behavior seen in Chainer Functions.
-5. Each __call__() or forward() should have a chainer.Variable as input.
-   There may be slight exceptions to this rule, since at a times
-   especially in this model a list is preferred, but try to stick to
-   this as close as possible. When avoiding this rule, consider setting
-   a property rather than passing the variable. For instance:
-
-   ```
-   link.transitions = transitions
-   loss = link(sentences)
-   ```
-6. Each link should be made to run on GPU and CPU.
-7. Type checking should be disabled using an environment variable.
-
-"""
-
-T_SKIP   = 2
 T_SHIFT  = 0
 T_REDUCE = 1
+T_SKIP   = 2
+
 
 TINY = 1e-8
 
@@ -89,14 +58,12 @@ class SentencePairTrainer(BaseSentencePairTrainer):
 
     def init_optimizer(self, lr=0.01, **kwargs):
         self.optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
-        # self.optimizer = optimizers.SGD(lr=0.01)
         self.optimizer.setup(self.model)
-        # self.optimizer.add_hook(chainer.optimizer.GradientClipping(40))
-        # self.optimizer.add_hook(chainer.optimizer.WeightDecay(0.00003))
 
 
 class SentenceTrainer(SentencePairTrainer):
     pass
+
 
 class Tracker(Chain):
 
@@ -157,9 +124,9 @@ class Tracker(Chain):
 class SPINN(Chain):
 
     def __init__(self, args, vocab, normalization=L.BatchNormalization,
-                 attention=False, attn_fn=None, use_reinforce=True, use_skips=False):
+                 use_reinforce=True, use_skips=False):
         super(SPINN, self).__init__(
-            reduce=Reduce(args.size, args.tracker_size, attention, attn_fn))
+            reduce=Reduce(args.size, args.tracker_size))
         if args.tracker_size is not None:
             self.add_link('tracker', Tracker(
                 args.size, args.tracker_size,
@@ -167,8 +134,6 @@ class SPINN(Chain):
                 use_tracker_dropout=args.use_tracker_dropout,
                 tracker_dropout_rate=args.tracker_dropout_rate, use_skips=use_skips))
         self.transition_weight = args.transition_weight
-        self.use_history = args.use_history
-        self.save_stack = args.save_stack
         self.use_reinforce = use_reinforce
         self.use_skips = use_skips
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
@@ -178,11 +143,10 @@ class SPINN(Chain):
             self.reinforce_lr = 0.01
             self.baseline = 0
             self.mu = 0.1
-            # self.transition_optimizer = optimizers.SGD(lr=self.reinforce_lr)
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
 
-    def __call__(self, example, attention=None, print_transitions=False, use_internal_parser=False,
+    def __call__(self, example, print_transitions=False, use_internal_parser=False,
                  validate_transitions=True, use_random=False, use_reinforce=False):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
@@ -192,17 +156,10 @@ class SPINN(Chain):
 
         # There are 2 * N - 1 transitons, so (|transitions| + 1) / 2 should equal N.
         self.buffers_n = [(len([t for t in ts if t != T_SKIP]) + 1) / 2 for ts in example.transitions]
-        for stack, buf in zip(self.stacks, self.bufs):
-            for ss in stack:
-                if self.save_stack:
-                    ss.buf = buf[:]
-                    ss.stack = stack[:]
-                    ss.tracking = None
         if hasattr(self, 'tracker'):
             self.tracker.reset_state()
         if hasattr(example, 'transitions'):
             self.transitions = example.transitions
-        self.attention = attention
         return self.run(run_internal_parser=True,
                         use_internal_parser=use_internal_parser,
                         validate_transitions=validate_transitions,
@@ -230,15 +187,6 @@ class SPINN(Chain):
 
     def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
             validate_transitions=True, use_random=False, use_reinforce=False):
-        # how to use:
-        # encoder.bufs = bufs, unbundled
-        # encoder.stacks = stacks, unbundled
-        # encoder.tracker.state = trackings, unbundled
-        # encoder.transitions = ExampleList of Examples, padded with n
-        # encoder.run()
-        self.history = [[] for buf in self.bufs] if self.use_history is not None \
-                        else itertools.repeat(None)
-
         transition_loss, transition_acc = 0, 0
         if hasattr(self, 'transitions'):
             num_transitions = self.transitions.shape[1]
@@ -250,7 +198,6 @@ class SPINN(Chain):
                 transitions = self.transitions[:, i]
                 transition_arr = list(transitions)
             else:
-            #     transition_arr = [0]*len(self.bufs)
                 raise Exception('Running without transitions not implemented')
 
             cant_skip = np.array([t != T_SKIP for t in transitions])
@@ -310,25 +257,17 @@ class SPINN(Chain):
 
                         self.memories.append(memory)
 
-            lefts, rights, trackings, attentions = [], [], [], []
-            batch = zip(transition_arr, self.bufs, self.stacks, self.history,
+            lefts, rights, trackings = [], [], []
+            batch = zip(transition_arr, self.bufs, self.stacks,
                         self.tracker.states if hasattr(self, 'tracker') and self.tracker.h is not None
-                        else itertools.repeat(None),
-                        self.attention if self.attention is not None
                         else itertools.repeat(None))
 
-            for ii, (transition, buf, stack, history, tracking, attention) in enumerate(batch):
+            for ii, (transition, buf, stack, tracking) in enumerate(batch):
                 must_shift = len(stack) < 2
 
                 if transition == T_SHIFT: # shift
-                    if self.save_stack:
-                        buf[-1].buf = buf[:]
-                        buf[-1].stack = stack[:]
-                        buf[-1].tracking = tracking
                     stack.append(buf.pop())
                     self.buffers_t[ii] += 1
-                    if self.use_history:
-                        history.append(stack[-1])
                 elif transition == T_REDUCE: # reduce
                     for lr in [rights, lefts]:
                         if len(stack) > 0:
@@ -337,27 +276,19 @@ class SPINN(Chain):
                             zeros = Variable(np.zeros(buf[0].shape,
                                 dtype=buf[0].data.dtype),
                                 volatile='auto')
-                            if self.save_stack:
-                                zeros.buf = buf[:]
-                                zeros.stack = stack[:]
-                                zeros.tracking = tracking
                             lr.append(zeros)
                     trackings.append(tracking)
-                    attentions.append(attention)
-                else:
-                    if self.use_history:
-                        history.append(buf[-1])  # pad history so it can be stacked/transposed
+                else: # skip
+                    pass
             if len(rights) > 0:
                 reduced = iter(self.reduce(
-                    lefts, rights, trackings, attentions))
-                for transition, stack, history in zip(
-                        transition_arr, self.stacks, self.history):
+                    lefts, rights, trackings))
+                for transition, stack in zip(
+                        transition_arr, self.stacks):
                     if transition == T_REDUCE: # reduce
                         new_stack_item = next(reduced)
                         assert isinstance(new_stack_item.data, np.ndarray), "Pushing cupy array to stack"
                         stack.append(new_stack_item)
-                        if self.use_history:
-                            history.append(stack[-1])
 
         if self.transition_weight is not None:
             # We compute statistics after the fact, since sub-batches can
@@ -505,14 +436,10 @@ class BaseModel(Chain):
                  input_keep_rate, classifier_keep_rate,
                  use_tracker_dropout=True, tracker_dropout_rate=0.1,
                  use_input_dropout=False, use_input_norm=False,
-                 use_classifier_norm=True,
                  gpu=-1,
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
-                 use_shift_composition=True,
-                 use_history=False,
-                 save_stack=False,
                  use_reinforce=False,
                  projection_dim=None,
                  encoding_dim=None,
@@ -540,7 +467,6 @@ class BaseModel(Chain):
         self.accFun = accuracy.accuracy
         self.initial_embeddings = initial_embeddings
         self.classifier_dropout_rate = 1. - classifier_keep_rate
-        self.use_classifier_norm = use_classifier_norm
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
         self.use_reinforce = use_reinforce
@@ -553,8 +479,6 @@ class BaseModel(Chain):
             'size': projection_dim,
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
             'transition_weight': transition_weight,
-            'use_history': use_history,
-            'save_stack': save_stack,
             'input_dropout_rate': 1. - input_keep_rate,
             'use_input_dropout': use_input_dropout,
             'use_input_norm': use_input_norm,
@@ -577,7 +501,7 @@ class BaseModel(Chain):
                         ))
 
         self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
-                 attention=False, attn_fn=None, use_reinforce=use_reinforce, use_skips=use_skips))
+                 use_reinforce=use_reinforce, use_skips=use_skips))
 
         if self.use_encode:
             # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather

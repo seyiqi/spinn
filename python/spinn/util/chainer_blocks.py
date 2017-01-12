@@ -441,40 +441,27 @@ class Reduce(Chain):
         size: The size of the model state.
         tracker_size: The size of the tracker LSTM hidden state, or None if no
             tracker is present.
-        attend (bool): Whether to accept an additional attention input.
-        attn_fn (function): A callback function to compute the attention value
-            given the left, right, tracker, and attention inputs. TODO
     """
 
-    def __init__(self, size, tracker_size=None, attend=False, attn_fn=None):
+    def __init__(self, size, tracker_size=None):
         super(Reduce, self).__init__(
             left=L.Linear(size, 5 * size),
             right=L.Linear(size, 5 * size, nobias=True))
         if tracker_size is not None:
             self.add_link('track',
                           L.Linear(tracker_size, 5 * size, nobias=True))
-        if attend:
-            self.add_link('attend', L.Linear(size, 5 * size, nobias=True))
-        self.attn_fn = lambda l, r, t, a: a if attn_fn is None else attn_fn
 
-    def __call__(self, left_in, right_in, tracking=None, attend=None):
+    def __call__(self, left_in, right_in, tracking=None):
         """Perform batched TreeLSTM composition.
 
         This implements the REDUCE operation of a SPINN in parallel for a
         batch of nodes. The batch size is flexible; only provide this function
         the nodes that actually need to be REDUCEd.
 
-        The TreeLSTM has two to four inputs: the first two are the left and
+        The TreeLSTM has two or three inputs: the first two are the left and
         right children being composed; the third is the current state of the
-        tracker LSTM if one is present in the SPINN model; the fourth is an
-        optional attentional input. All are provided as iterables and batched
-        internally into tensors.
-
-        Additionally augments each new node with pointers to its children as
-        well as concatenated attributes ``transitions`` and ``tokens`` and
-        the states of the buffer, stack, and tracker prior to the first SHIFT
-        of a token that is part of the node. This allows restarting the
-        encoding process with modifications to a particular node.
+        tracker LSTM if one is present in the SPINN model. All are provided 
+        as iterables and batched internally into tensors.
 
         Args:
             left_in: Iterable of ``B`` ~chainer.Variable objects containing
@@ -486,33 +473,16 @@ class Reduce(Chain):
             tracking: Iterable of ``B`` ~chainer.Variable objects containing
                 ``c`` and ``h`` concatenated for the tracker LSTM state of
                 each node in the batch, or None.
-            attend: Iterable of ``B`` ~chainer.Variable objects containing
-                ``c`` and ``h`` concatenated for the attention state to be fed
-                into each node in the batch, or None.
 
         Returns:
             out: Tuple of ``B`` ~chainer.Variable objects containing ``c`` and
-                ``h`` concatenated for the LSTM state of each new node. These
-                objects are also augmented with ``left``, ``right``,
-                ``tokens``, ``transitions``, ``buf``, ``stack``, and
-                ``tracking`` attributes.
+                ``h`` concatenated for the LSTM state of each new node.
         """
         left, right = bundle(left_in), bundle(right_in)
-        tracking, attend = bundle(tracking), bundle(attend)
+        tracking = bundle(tracking)
         lstm_in = self.left(left.h)
         lstm_in += self.right(right.h)
         if hasattr(self, 'track'):
             lstm_in += self.track(tracking.h)
-        if hasattr(self, 'attend'):
-            lstm_in += self.attend(attend.h)
         out = unbundle(treelstm(left.c, right.c, lstm_in))
-        for o, l, r in zip(out, left_in, right_in):
-            if hasattr(l, 'buf'):
-                o.left, o.right = l, r
-                o.buf = o.left.buf
-                # o.left.parent, o.right.parent = o, o
-                o.transitions = o.left.transitions + o.right.transitions + [1]
-                o.tokens = o.left.tokens + o.right.tokens
-                o.stack = o.left.stack
-                o.tracking = o.left.tracking
         return out
