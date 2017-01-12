@@ -375,14 +375,13 @@ def run(only_forward=False):
             total_cost_val = 0.0
             total_cost_val += xent_loss.data
             total_cost_val += l2_loss.data
-            if not FLAGS.use_reinforce:
-                total_cost_val += transition_cost_val
+            total_cost_val += transition_cost_val
 
             # Accumulate Total Loss Variable
             total_loss = 0.0
             total_loss += xent_loss
             total_loss += l2_loss
-            if hasattr(transition_loss, 'backward') and not FLAGS.use_reinforce:
+            if hasattr(transition_loss, 'backward'):
                 total_loss += transition_loss
 
             # Get gradients

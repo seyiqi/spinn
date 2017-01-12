@@ -36,8 +36,6 @@ T_REDUCE = 1
 T_SKIP   = 2
 
 
-TINY = 1e-8
-
 def HeKaimingInit(shape, real_shape=None):
     # Calculate fan-in / fan-out using real shape if given as override
     fan = real_shape or shape
@@ -142,8 +140,6 @@ class SPINN(Chain):
         if self.use_reinforce:
             self.reinforce_lr = 0.01
             self.mu = 0.1
-            self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
-            self.transition_optimizer.setup(self.tracker)
             self.add_persistent('baseline', 0)
 
     def __call__(self, example, print_transitions=False, use_internal_parser=False,
@@ -375,14 +371,9 @@ class SPINN(Chain):
         else:
             new_rewards = expand_along(new_rewards, self.transition_mask)
 
-        self.transition_optimizer.zero_grads()
-
         transition_loss = F.sum(-1. * log_p_preds * new_rewards) / log_p_preds.shape[0]
-        transition_loss += TINY
-        transition_loss.backward()
-        transition_loss.unchain_backward()
 
-        self.transition_optimizer.update()
+        return transition_loss
 
 
 class LSTMChain(Chain):
@@ -591,7 +582,7 @@ class BaseModel(Chain):
             # TODO (Alex): Why would this have needed to be negative?
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
             rewards = self.build_rewards(y, y_batch)
-            self.spinn.reinforce(rewards)
+            transition_loss = self.spinn.reinforce(rewards)
 
         if hasattr(transition_acc, 'data'):
           transition_acc = transition_acc.data
