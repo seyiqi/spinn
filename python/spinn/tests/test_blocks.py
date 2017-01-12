@@ -35,6 +35,19 @@ class BlocksTestCase(unittest.TestCase):
         assert len(ret) == len(expected)
         assert all(r == e for r, e in zip(ret, expected))
 
+    def test_model_save(self):
+        c = Chain()
+        c.add_persistent('baseline', 2)
+        c2 = c.copy()
+
+        s = serializers.DictionarySerializer()
+        s.save(c)
+
+        d = serializers.NpzDeserializer(s.target)
+        d.load(c2)
+
+        assert c.baseline == c2.baseline
+
 
 if __name__ == '__main__':
     unittest.main()

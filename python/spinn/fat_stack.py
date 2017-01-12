@@ -145,6 +145,7 @@ class SPINN(Chain):
             self.mu = 0.1
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
+            self.add_persistent('baseline', 0)
 
     def __call__(self, example, print_transitions=False, use_internal_parser=False,
                  validate_transitions=True, use_random=False, use_reinforce=False):
