@@ -436,12 +436,10 @@ class BaseModel(Chain):
                  input_keep_rate, classifier_keep_rate,
                  use_tracker_dropout=True, tracker_dropout_rate=0.1,
                  use_input_dropout=False, use_input_norm=False,
-                 use_classifier_norm=True,
                  gpu=-1,
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
-                 use_shift_composition=True,
                  use_reinforce=False,
                  projection_dim=None,
                  encoding_dim=None,
@@ -469,7 +467,6 @@ class BaseModel(Chain):
         self.accFun = accuracy.accuracy
         self.initial_embeddings = initial_embeddings
         self.classifier_dropout_rate = 1. - classifier_keep_rate
-        self.use_classifier_norm = use_classifier_norm
         self.word_embedding_dim = word_embedding_dim
         self.model_dim = model_dim
         self.use_reinforce = use_reinforce

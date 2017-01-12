@@ -50,11 +50,9 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              use_input_norm=FLAGS.use_input_norm,
              tracker_dropout_rate=FLAGS.tracker_dropout_rate,
              use_tracker_dropout=FLAGS.use_tracker_dropout,
-             use_classifier_norm=FLAGS.use_classifier_norm,
              tracking_lstm_hidden_dim=FLAGS.tracking_lstm_hidden_dim,
              transition_weight=FLAGS.transition_weight,
              use_tracking_lstm=FLAGS.use_tracking_lstm,
-             use_shift_composition=FLAGS.use_shift_composition,
              use_sentence_pair=use_sentence_pair,
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
@@ -531,7 +529,6 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
-    gflags.DEFINE_boolean("use_shift_composition", True, "")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
     gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the RHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
@@ -542,14 +539,12 @@ if __name__ == '__main__':
         "Used for dropout in the semantic task classifier.")
     gflags.DEFINE_float("embedding_keep_rate", 0.9,
         "Used for dropout on transformed embeddings.")
-    gflags.DEFINE_boolean("use_input_dropout", False, "")
     gflags.DEFINE_boolean("use_random", False, "When predicting parse, rather than logits,"
                                                "use a uniform distribution over actions.")
-    gflags.DEFINE_boolean("use_input_norm", False, "")
-    gflags.DEFINE_boolean("use_tracker_dropout", False, "")
-    gflags.DEFINE_boolean("use_classifier_norm", False, "")
-    gflags.DEFINE_float("tracker_dropout_rate", 0.1, "")
-    gflags.DEFINE_boolean("lstm_composition", True, "")
+    gflags.DEFINE_boolean("use_input_dropout", False, "Apply dropout to transformed embeddings.")
+    gflags.DEFINE_boolean("use_input_norm", False, "Apply batch normalization to transformed embeddings.")
+    gflags.DEFINE_boolean("use_tracker_dropout", False, "Apply dropout to the input of the tracker.")
+    gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
 
     # Optimization settings.
     gflags.DEFINE_integer("training_steps", 500000, "Stop training after this point.")
