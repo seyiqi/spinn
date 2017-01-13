@@ -298,9 +298,9 @@ class SPINN(Chain):
                 hyp_xent, truth_xent.astype(np.int32),
                 normalize=False)
 
+            transition_loss *= self.transition_weight
             reporter.report({'transition_accuracy': transition_acc,
                              'transition_loss': transition_loss}, self)
-            transition_loss *= self.transition_weight
         else:
             transition_loss = None
 
@@ -462,6 +462,7 @@ class BaseModel(Chain):
         self.model_dim = model_dim
         self.use_reinforce = use_reinforce
         self.use_encode = use_encode
+        self.transition_weight = transition_weight
 
         if projection_dim <= 0 or not self.use_encode:
             projection_dim = model_dim/2
@@ -583,6 +584,7 @@ class BaseModel(Chain):
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
             rewards = self.build_rewards(y, y_batch)
             transition_loss = self.spinn.reinforce(rewards)
+            transition_loss *= self.transition_weight
 
         if hasattr(transition_acc, 'data'):
           transition_acc = transition_acc.data
