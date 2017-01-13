@@ -444,6 +444,7 @@ class BaseModel(Chain):
                  use_skips=False,
                  use_sentence_pair=False,
                  num_mlp_layers=2,
+                 mlp_bn=False,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
@@ -453,10 +454,11 @@ class BaseModel(Chain):
         mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
 
         # Initialize Classifier Parameters
-        self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers)
+        self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
         self.mlp_input_dim = mlp_input_dim
         self.mlp_dim = mlp_dim
         self.num_mlp_layers = num_mlp_layers
+        self.mlp_bn = mlp_bn
 
         self.classifier = CrossEntropyClassifier(gpu)
         self.__gpu = gpu
@@ -508,10 +510,12 @@ class BaseModel(Chain):
             self.add_link('bwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
 
 
-    def init_mlp(self, mlp_input_dim, mlp_dim, num_classes, num_mlp_layers):
+    def init_mlp(self, mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn):
         features_dim = mlp_input_dim
         for i in range(num_mlp_layers):
             self.add_link('l{}'.format(i), L.Linear(features_dim, mlp_dim))
+            if mlp_bn:
+                self.add_link('bn{}'.format(i), L.BatchNormalization(mlp_dim))
             features_dim = mlp_dim
         self.add_link('l{}'.format(num_mlp_layers), L.Linear(features_dim, num_classes))
 
@@ -570,6 +574,9 @@ class BaseModel(Chain):
             layer = getattr(self, 'l{}'.format(i))
             h = layer(h)
             h = F.relu(h)
+            if self.mlp_bn:
+                bn = getattr(self, 'bn{}'.format(i))
+                h = bn(h, test=not train, finetune=False)
             # TODO: Theano code rescales during Eval. This is opposite of what Chainer does.
             h = dropout(h, ratio=self.classifier_dropout_rate, train=train)
         layer = getattr(self, 'l{}'.format(self.num_mlp_layers))

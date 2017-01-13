@@ -55,6 +55,7 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              use_tracking_lstm=FLAGS.use_tracking_lstm,
              use_sentence_pair=use_sentence_pair,
              num_mlp_layers=FLAGS.num_mlp_layers,
+             mlp_bn=FLAGS.mlp_bn,
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
@@ -544,6 +545,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_tracker_dropout", False, "Apply dropout to the input of the tracker.")
     gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
     gflags.DEFINE_integer("num_mlp_layers", 2, "")
+    gflags.DEFINE_boolean("mlp_bn", True, "Use batch normalization within semantic classifier.")
 
     # Optimization settings.
     gflags.DEFINE_integer("training_steps", 500000, "Stop training after this point.")
