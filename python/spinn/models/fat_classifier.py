@@ -54,6 +54,8 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              transition_weight=FLAGS.transition_weight,
              use_tracking_lstm=FLAGS.use_tracking_lstm,
              use_sentence_pair=use_sentence_pair,
+             num_mlp_layers=FLAGS.num_mlp_layers,
+             mlp_bn=FLAGS.mlp_bn,
              gpu=gpu,
              use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
@@ -520,10 +522,8 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("mlp_dim", 1024, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
-
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
-
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
@@ -531,19 +531,21 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
     gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the RHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
-                                                        "that give a valid parse tree.")
+        "that give a valid parse tree.")
     gflags.DEFINE_boolean("use_tracking_lstm", True,
-                          "Whether to use LSTM in the tracking unit")
+        "Whether to use LSTM in the tracking unit")
     gflags.DEFINE_float("semantic_classifier_keep_rate", 0.9,
         "Used for dropout in the semantic task classifier.")
     gflags.DEFINE_float("embedding_keep_rate", 0.9,
         "Used for dropout on transformed embeddings.")
     gflags.DEFINE_boolean("use_random", False, "When predicting parse, rather than logits,"
-                                               "use a uniform distribution over actions.")
+        "use a uniform distribution over actions.")
     gflags.DEFINE_boolean("use_input_dropout", False, "Apply dropout to transformed embeddings.")
     gflags.DEFINE_boolean("use_input_norm", False, "Apply batch normalization to transformed embeddings.")
     gflags.DEFINE_boolean("use_tracker_dropout", False, "Apply dropout to the input of the tracker.")
     gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
+    gflags.DEFINE_integer("num_mlp_layers", 2, "")
+    gflags.DEFINE_boolean("mlp_bn", True, "Use batch normalization within semantic classifier.")
 
     # Optimization settings.
     gflags.DEFINE_integer("training_steps", 500000, "Stop training after this point.")

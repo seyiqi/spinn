@@ -44,6 +44,12 @@ def HeKaimingInit(shape, real_shape=None):
                             size=shape)
 
 
+def dropout(inp, ratio, train):
+    if ratio > 0:
+        return F.dropout(inp, ratio, train)
+    return inp
+
+
 class SentencePairTrainer(BaseSentencePairTrainer):
     def init_params(self, **kwargs):
         for name, param in self.model.namedparams():
@@ -101,7 +107,7 @@ class Tracker(Chain):
                 volatile='auto')
 
         if self.use_tracker_dropout:
-            lstm_in = F.dropout(lstm_in, self.tracker_dropout_rate, train=lstm_in.volatile == False)
+            lstm_in = dropout(lstm_in, self.tracker_dropout_rate, train=lstm_in.volatile == False)
 
         self.c, self.h = F.lstm(self.c, lstm_in)
         if hasattr(self, 'transition'):
@@ -437,6 +443,8 @@ class BaseModel(Chain):
                  use_encode=False,
                  use_skips=False,
                  use_sentence_pair=False,
+                 num_mlp_layers=2,
+                 mlp_bn=False,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
@@ -445,12 +453,12 @@ class BaseModel(Chain):
 
         mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
 
-        if mlp_dim > -1:
-            self.add_link('l0', L.Linear(mlp_input_dim, mlp_dim))
-            self.add_link('l1', L.Linear(mlp_dim, mlp_dim))
-            self.add_link('l2', L.Linear(mlp_dim, num_classes))
-        else:
-            self.add_link('l0', L.Linear(mlp_input_dim, num_classes))
+        # Initialize Classifier Parameters
+        self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
+        self.mlp_input_dim = mlp_input_dim
+        self.mlp_dim = mlp_dim
+        self.num_mlp_layers = num_mlp_layers
+        self.mlp_bn = mlp_bn
 
         self.classifier = CrossEntropyClassifier(gpu)
         self.__gpu = gpu
@@ -500,6 +508,16 @@ class BaseModel(Chain):
             # than just [concat(fwd, bwd)]. More generally, [concat(embed, activation(embed))].
             self.add_link('fwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
             self.add_link('bwd_rnn', LSTMChain(input_dim=args.size * 2, hidden_dim=model_dim/2, seq_length=seq_length))
+
+
+    def init_mlp(self, mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn):
+        features_dim = mlp_input_dim
+        for i in range(num_mlp_layers):
+            self.add_link('l{}'.format(i), L.Linear(features_dim, mlp_dim))
+            if mlp_bn:
+                self.add_link('bn{}'.format(i), L.BatchNormalization(mlp_dim))
+            features_dim = mlp_dim
+        self.add_link('l{}'.format(num_mlp_layers), L.Linear(features_dim, num_classes))
 
 
     def build_example(self, sentences, transitions, train):
@@ -552,16 +570,17 @@ class BaseModel(Chain):
     def run_mlp(self, h, train):
         # Pass through MLP Classifier.
         h = to_gpu(h)
-        h = self.l0(h)
-
-        if hasattr(self, 'l1'):
+        for i in range(self.num_mlp_layers):
+            layer = getattr(self, 'l{}'.format(i))
+            h = layer(h)
             h = F.relu(h)
-            h = self.l1(h)
-            h = F.relu(h)
-            h = self.l2(h)
-            
-        y = h
-
+            if self.mlp_bn:
+                bn = getattr(self, 'bn{}'.format(i))
+                h = bn(h, test=not train, finetune=False)
+            # TODO: Theano code rescales during Eval. This is opposite of what Chainer does.
+            h = dropout(h, ratio=self.classifier_dropout_rate, train=train)
+        layer = getattr(self, 'l{}'.format(self.num_mlp_layers))
+        y = layer(h)
         return y
 
 
