@@ -141,7 +141,6 @@ class SPINN(Chain):
 
         if self.use_reinforce:
             self.reinforce_lr = 0.01
-            self.baseline = 0
             self.mu = 0.1
             self.transition_optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
             self.transition_optimizer.setup(self.tracker)
