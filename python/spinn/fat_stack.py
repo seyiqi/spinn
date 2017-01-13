@@ -44,6 +44,12 @@ def HeKaimingInit(shape, real_shape=None):
                             size=shape)
 
 
+def dropout(inp, ratio, train):
+    if ratio > 0:
+        return F.dropout(inp, ratio, train)
+    return inp
+
+
 class SentencePairTrainer(BaseSentencePairTrainer):
     def init_params(self, **kwargs):
         for name, param in self.model.namedparams():
@@ -101,7 +107,7 @@ class Tracker(Chain):
                 volatile='auto')
 
         if self.use_tracker_dropout:
-            lstm_in = F.dropout(lstm_in, self.tracker_dropout_rate, train=lstm_in.volatile == False)
+            lstm_in = dropout(lstm_in, self.tracker_dropout_rate, train=lstm_in.volatile == False)
 
         self.c, self.h = F.lstm(self.c, lstm_in)
         if hasattr(self, 'transition'):
@@ -564,6 +570,8 @@ class BaseModel(Chain):
             layer = getattr(self, 'l{}'.format(i))
             h = layer(h)
             h = F.relu(h)
+            # TODO: Theano code rescales during Eval. This is opposite of what Chainer does.
+            h = dropout(h, ratio=self.classifier_dropout_rate, train=train)
         layer = getattr(self, 'l{}'.format(self.num_mlp_layers))
         y = layer(h)
         return y
