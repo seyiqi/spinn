@@ -22,8 +22,8 @@ from chainer.functions.activation import slstm
 from chainer.utils import type_check
 from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
 
-from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
-from spinn.util.chainer_blocks import LSTMState, Embed
+from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping
+from spinn.util.chainer_blocks import LSTMState, Embed, Reduce
 from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm, expand_along
@@ -60,9 +60,15 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             else:
                 data[:] = np.random.uniform(-0.1, 0.1, data.shape)
 
-    def init_optimizer(self, lr=0.01, **kwargs):
-        self.optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
+    def init_optimizer(self, lr=0.001, clip=5.0, **kwargs):
+        if kwargs["opt"] == "RMSProp":
+            self.optimizer = optimizers.RMSprop(lr=lr, alpha=0.9, eps=1e-06)
+        elif kwargs["opt"] == "Adam":
+            self.optimizer = optimizers.Adam(alpha=lr, beta1=0.9, beta2=0.999, eps=1e-08)
+        else:
+            raise Exception("Not implemented.")
         self.optimizer.setup(self.model)
+        self.optimizer.add_hook(HardGradientClipping(-clip, clip))
 
 
 class SentenceTrainer(SentencePairTrainer):

@@ -18,6 +18,32 @@ from chainer import testing
 from chainer.utils import type_check
 
 
+class HardGradientClipping(object):
+
+    """Optimizer hook function for hard gradient clipping.
+
+    This hook function limits gradient values within the boundary.
+
+    Args:
+        x_min (float): minimum gradient value.
+        x_max (float): maximum gradient value.
+
+    Attributes:
+        x_min (float): minimum gradient value.
+        x_max (float): maximum gradient value.
+
+    """
+    name = 'HardGradientClipping'
+
+    def __init__(self, x_min, x_max):
+        self.x_min = x_min
+        self.x_max = x_max
+
+    def __call__(self, opt):
+        for param in opt.target.params():
+            param.grad = F.clip(param.grad, self.x_min, self.x_max).data
+
+
 def expand_along(rewards, tr_mask):
     assert isinstance(rewards, np.ndarray)
     mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[0]), (tr_mask.shape[1], 1)).T)

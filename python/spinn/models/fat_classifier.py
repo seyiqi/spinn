@@ -319,8 +319,9 @@ def run(only_forward=False):
         logger.Log("Training.")
 
         classifier_trainer.init_optimizer(
-            clip=FLAGS.clipping_max_value, decay=FLAGS.l2_lambda,
             lr=FLAGS.learning_rate,
+            clip=FLAGS.clipping_max_value,
+            opt=FLAGS.opt,
             )
 
         model = classifier_trainer.optimizer.target
@@ -392,6 +393,11 @@ def run(only_forward=False):
             # Apply gradients
             classifier_trainer.update()
 
+            if FLAGS.use_lr_decay:
+                # Update Learning Rate
+                learning_rate = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
+                classifier_trainer.optimizer.lr = learning_rate
+
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
 
@@ -445,7 +451,7 @@ def run(only_forward=False):
                 for index, eval_set in enumerate(eval_iterators):
                     acc = evaluate(classifier_trainer, eval_set, logger, step, vocabulary=vocabulary if FLAGS.print_tree else None,
                         eval_data_limit=FLAGS.eval_data_limit, use_internal_parser=FLAGS.use_internal_parser)
-                    if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
+                    if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < dev_error_threshold and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
                         classifier_trainer.save(checkpoint_path, step, best_dev_error)
@@ -545,6 +551,8 @@ if __name__ == '__main__':
     # Optimization settings.
     gflags.DEFINE_integer("training_steps", 500000, "Stop training after this point.")
     gflags.DEFINE_integer("batch_size", 32, "SGD minibatch size.")
+    gflags.DEFINE_enum("opt", "RMSProp", ["RMSProp", "Adam"], "Specify optimization method.")
+    gflags.DEFINE_boolean("use_lr_decay", True, "Used in RMSProp.")
     gflags.DEFINE_float("learning_rate", 0.001, "Used in RMSProp.")
     gflags.DEFINE_float("learning_rate_decay_per_10k_steps", 0.75, "Used in RMSProp.")
     gflags.DEFINE_float("clipping_max_value", 5.0, "")
