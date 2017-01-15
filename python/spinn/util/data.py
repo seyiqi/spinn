@@ -25,49 +25,38 @@ SENTENCE_PADDING_SYMBOL = SHIFT_SYMBOL
 CORE_VOCABULARY = {PADDING_TOKEN: 0,
                    UNK_TOKEN: 1}
 
-# Allowed number of transition types : currently PUSH : 0 and MERGE : 1
-NUM_TRANSITION_TYPES = 2
 
+def transitions_to_parse(sentence, transitions, evalb=False):
+    SHIFT_SYMBOL = 0
+    REDUCE_SYMBOL = 1
 
-import pydot
-
-
-def create_tree(words, transitions):
-    template_start = """
-    digraph G {
-        nodesep=0.4; //was 0.8
-        ranksep=0.5;
-    """
-    template_end = """
-    }
-    """
-    template = ""
-    template += template_start
-    buf = list(reversed(words))
+    buf = list(reversed(sentence[:]))
     stack = []
-    leaves = []
-    for i, t in enumerate(transitions):
-        if t == 0:
-            stack.append((i+1,t))
-            leaves.append(str(i+1))
-            template += '{node[label = "%s"]; %s;}\n' % (str(buf.pop()), str(i+1))
-        else:
-            right = stack.pop()
-            left = stack.pop()
-            top = i + 1
-            stack.append((top, (left, right)))
-            template += "{} -> {};\n".format(top, left[0])
-            template += "{} -> {};\n".format(top, right[0])
-    template += "{rank=same; %s}" % ("; ".join(leaves))
-    template += template_end
-    return stack, template
+
+    for t in transitions:
+        if t == SHIFT_SYMBOL:
+            stack.append(buf.pop())
+        elif t == REDUCE_SYMBOL:
+            right, left = stack.pop(), stack.pop()
+            if evalb:
+                new_stack_item = "(B (A {}) (A {}))".format(left, right)
+            else:
+                new_stack_item = "( {} {} )".format(left, right)
+            stack.append(new_stack_item)
+
+    assert len(stack) == 1
+
+    return stack.pop()
 
 
-def print_tree(sentence, transitions, output_file):
-    _, tree = create_tree(sentence, transitions)
-    graphs = pydot.graph_from_dot_data(tree)
-    open(output_file, 'wb').write(graphs[0].create_jpeg())
-    return graphs[0]
+def print_tree(sentence, ground_truth, predicted, inv_vocab=None, evalb=False):
+    sentence = [s for s in sentence if s != PADDING_TOKEN]
+    if inv_vocab is not None:
+        sentence = [inv_vocab[s] for s in sentence]
+    ground_truth = [t for t in ground_truth if t != SKIP_SYMBOL]
+
+    return (transitions_to_parse(sentence, ground_truth, evalb),
+        transitions_to_parse(sentence, predicted, evalb))
 
 
 def TrimDataset(dataset, seq_length, eval_mode=False, sentence_pair_data=False):

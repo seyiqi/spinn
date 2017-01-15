@@ -88,18 +88,11 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
     progress_bar = SimpleProgressBar(msg="Run Eval", bar_length=60, enabled=FLAGS.show_progress_bar)
     progress_bar.step(0, total=total_batches)
 
-    if vocabulary:
-        inv_vocab = {v: k for k, v in vocabulary.iteritems()}
-
-    if FLAGS.print_tree:
-        graph_path = "graphs" if not FLAGS.use_reinforce else "graphs-rl"
-        summaries_file = "{}/summaries.txt".format(graph_path)
-        with open(summaries_file, "w") as f:
-            f.write("id,hamming,gold,pred\n")
-
     accum_preds = deque()
     accum_truth = deque()
     model = classifier_trainer.optimizer.target
+    evalb_parses = []
+    parses = []
     for i, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in enumerate(eval_set[1]):
         # Calculate Local Accuracies
         if eval_data_limit == -1 or i < eval_data_limit:
@@ -129,33 +122,33 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
         if FLAGS.print_tree:
             memories = classifier_trainer.model.spinn.memories
             all_preds = [el['preds'] for el in memories]
+            all_preds = zip(*all_preds)
+
+            if vocabulary is not None:
+                inv_vocab = {v: k for k, v in vocabulary.iteritems()}
+            
             for ii in range(len(eval_X_batch)):
-                print(i, ii)
                 sentence = eval_X_batch[ii]
-                sentence = [s for s in sentence if s != 0]
-                sentence = [inv_vocab[s] for s in sentence]
-                transitions = eval_transitions_batch[ii]
-                offset = len(transitions)
-                transitions = [t for t in transitions if t != 2]
-                offset = offset - len(transitions)
-                preds = np.array(all_preds[offset:])[:, ii]
-
-                tree_id = "{:03}_{:03}".format(i, ii)
-
-                print_tree(sentence, transitions, "{}/gold/tree_{}.png".format(graph_path, tree_id))
-                print_tree(sentence, preds, "{}/pred/tree_{}.png".format(graph_path, tree_id))
-
-                with open(summaries_file, "a") as f:
-                    f.write("{},{},{},{}\n".format(
-                        tree_id,
-                        hamming_distance(transitions, preds),
-                        "".join([str(t) for t in transitions]),
-                        "".join([str(t) for t in preds]),
-                        ))
+                ground_truth = eval_transitions_batch[ii]
+                predicted = all_preds[ii]
+                parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=True))
+                parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=False))
 
         # Print Progress
         progress_bar.step(i+1, total=total_batches)
     progress_bar.finish()
+
+    # Print Trees to file for use in Error Analysis
+    if FLAGS.print_tree:
+        with open("{}.trees.gld", "w") as f:
+            for ground_truth_tree, predicted_tree in evalb_parses:
+                f.write("(S {})\n".format(ground_truth_tree))
+        with open("{}.trees.tst", "w") as f:
+            for ground_truth_tree, predicted_tree in evalb_parses:
+                f.write("(S {})\n".format(predicted_tree))
+        with open("{}.trees.txt".format(FLAGS.experiment_name), "w") as f:
+            for ground_truth_tree, predicted_tree in parses:
+                f.write("{}\t{}\n".format(ground_truth_tree, predicted_tree))
 
     # Accumulate Action Accuracy this way because of the UseSkips/NoUseSkips toggle.
     all_preds = flatten(accum_preds)
