@@ -60,8 +60,8 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             else:
                 data[:] = np.random.uniform(-0.1, 0.1, data.shape)
 
-    def init_optimizer(self, lr=0.01, **kwargs):
-        self.optimizer = optimizers.Adam(alpha=0.0003, beta1=0.9, beta2=0.999, eps=1e-08)
+    def init_optimizer(self, lr=0.001, **kwargs):
+        self.optimizer = optimizers.RMSprop(lr=lr, alpha=0.9, eps=1e-06)
         self.optimizer.setup(self.model)
 
 

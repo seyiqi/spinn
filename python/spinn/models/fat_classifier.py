@@ -392,6 +392,10 @@ def run(only_forward=False):
             # Apply gradients
             classifier_trainer.update()
 
+            # Update Learning Rate
+            learning_rate = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
+            classifier_trainer.optimizer.lr = learning_rate
+
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
 
