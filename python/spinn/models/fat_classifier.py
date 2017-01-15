@@ -436,21 +436,16 @@ def run(only_forward=False):
                 accum_preds.clear()
                 accum_truth.clear()
 
-            if step > 0 and step % FLAGS.ckpt_interval_steps == 0:
+            if step > 0 and (step % FLAGS.ckpt_interval_steps == 0 or step % FLAGS.eval_interval_steps == 0):
+                if step % FLAGS.ckpt_interval_steps == 0:
+                    dev_error_threshold = best_dev_error
+                else:
+                    dev_error_threshold = 0.99 * best_dev_error
+
                 for index, eval_set in enumerate(eval_iterators):
-                    acc = evaluate(classifier_trainer, eval_set, logger, step,
-                        eval_data_limit=-1, use_internal_parser=FLAGS.use_internal_parser)
+                    acc = evaluate(classifier_trainer, eval_set, logger, step, vocabulary=vocabulary if FLAGS.print_tree else None,
+                        eval_data_limit=FLAGS.eval_data_limit, use_internal_parser=FLAGS.use_internal_parser)
                     if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < best_dev_error and step > FLAGS.ckpt_step:
-                        best_dev_error = 1 - acc
-                        logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
-                        classifier_trainer.save(checkpoint_path, step, best_dev_error)
-                    if FLAGS.write_summaries:
-                        dev_summary_logger.log(step=step, loss=0.0, accuracy=acc)
-                progress_bar.reset()
-            elif step > 0 and step % FLAGS.eval_interval_steps == 0:
-                for index, eval_set in enumerate(eval_iterators):
-                    acc = evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=FLAGS.eval_data_limit)
-                    if FLAGS.ckpt_on_best_dev_error and index == 0 and (1 - acc) < 0.99 * best_dev_error and step > FLAGS.ckpt_step:
                         best_dev_error = 1 - acc
                         logger.Log("Checkpointing with new best dev accuracy of %f" % acc)
                         classifier_trainer.save(checkpoint_path, step, best_dev_error)
