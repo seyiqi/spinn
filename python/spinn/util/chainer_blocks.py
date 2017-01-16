@@ -44,6 +44,12 @@ class HardGradientClipping(object):
             param.grad = F.clip(param.grad, self.x_min, self.x_max).data
 
 
+def dropout(inp, ratio, train):
+    if ratio > 0:
+        return F.dropout(inp, ratio, train)
+    return inp
+
+
 def expand_along(rewards, tr_mask):
     assert isinstance(rewards, np.ndarray)
     mask = np.extract(tr_mask, np.tile(np.arange(tr_mask.shape[0]), (tr_mask.shape[1], 1)).T)
@@ -257,7 +263,7 @@ def treelstm(c_left, c_right, gates, use_dropout=False):
     i_val = i_gate * cell_inp
     dropout_rate = 0.1
     if use_dropout:
-        i_val = F.dropout(i_val, dropout_rate, train=i_val.volatile == False)
+        i_val = dropout(i_val, dropout_rate, train=i_val.volatile == False)
     c_t = fl_gate * c_left + fr_gate * c_right + i_val
     h_t = o_gate * F.tanh(c_t)
 
@@ -322,7 +328,7 @@ class MLP(ChainList):
         h = x_batch
 
         for l0 in self.children():
-            h = F.dropout(h, ratio, train)
+            h = dropout(h, ratio, train)
             h = F.relu(l0(h))
         y = h
         return y
@@ -416,7 +422,7 @@ class Embed(Chain):
         self.use_input_dropout = use_input_dropout
         self.use_input_norm = use_input_norm
 
-    def __call__(self, tokens):
+    def __call__(self, tokens, train):
         """Embed a tensor of tokens into a list of SPINN buffers.
 
         Returns the embeddings as a list of lists of ~chainer.Variable objects
@@ -450,7 +456,7 @@ class Embed(Chain):
             embeds = self.normalization(embeds, embeds.volatile == 'on')
 
         if self.use_input_dropout:
-            embeds = F.dropout(embeds, self.dropout, embeds.volatile == 'off')
+            embeds = dropout(embeds, self.dropout, train)
 
         return to_cpu(embeds)
 

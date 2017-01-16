@@ -353,6 +353,8 @@ def run(only_forward=False):
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
+            xent_loss *= FLAGS.y_lambda
+
             accum_class_preds.append(y.data.argmax(axis=1))
             accum_class_truth.append(y_batch)
 
@@ -525,6 +527,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("mlp_dim", 1024, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
+    gflags.DEFINE_float("y_lambda", 1.0, "Linear scale for classification loss.")
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
