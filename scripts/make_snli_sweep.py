@@ -34,7 +34,7 @@ FIXED_PARAMETERS = {
     "eval_seq_length":	"50",
     "eval_interval_steps": "500",
     "statistics_interval_steps": "500",
-    # "use_reinforce": "",
+    "use_reinforce": "",
     "use_internal_parser": "",
     "batch_size":  "32",
     "ckpt_path":  "~/logs"
@@ -42,14 +42,15 @@ FIXED_PARAMETERS = {
 
 # Tunable parameters.
 SWEEP_PARAMETERS = {
-    "learning_rate":      (EXP, 0.0002, 0.01),  # RNN likes higher end of range, but below 009.
-    "l2_lambda":   		  (EXP, 8e-7, 2e-5),
-    "semantic_classifier_keep_rate": (LIN, 0.80, 0.95),  # NB: Keep rates may depend considerably on dims.
-    "embedding_keep_rate": (LIN, 0.8, 0.95),
-    "transition_cost_scale": (LIN, 0.5, 4.0),
-    "learning_rate_decay_per_10k_steps": (EXP, 0.5, 1.0),
-    "tracking_lstm_hidden_dim": (EXP, 24, 128),
-    "transition_weight":  (EXP, 0.1, 3.0)
+    "learning_rate":      ("lr", EXP, 0.0002, 0.01),  # RNN likes higher end of range, but below 009.
+    "l2_lambda":   		  ("l2", EXP, 8e-7, 2e-5),
+    "semantic_classifier_keep_rate": ("skr", LIN, 0.7, 0.95),  # NB: Keep rates may depend considerably on dims.
+    "embedding_keep_rate": ("ekr", LIN, 0.7, 0.95),
+    "transition_cost_scale": ("tcs", LIN, 0.5, 4.0),
+    "learning_rate_decay_per_10k_steps": ("dec", EXP, 0.5, 1.0),
+    "tracking_lstm_hidden_dim": ("tdim", EXP, 24, 128),
+    "transition_weight":  ("trwt", EXP, 0.1, 3.0),
+    "num_mlp_layers": ("mlp", LIN, 1, 3)
 }
 
 sweep_name = "sweep_" + \
@@ -66,12 +67,14 @@ print
 
 for run_id in range(sweep_runs):
     params = {}
+    name = sweep_name + "_" + str(run_id)
+
     params.update(FIXED_PARAMETERS)
     for param in SWEEP_PARAMETERS:
         config = SWEEP_PARAMETERS[param]
-        t = config[0]
-        mn = config[1]
-        mx = config[2]
+        t = config[1]
+        mn = config[2]
+        mx = config[3]
 
         r = random.uniform(0, 1)
         if t == EXP:
@@ -87,21 +90,19 @@ for run_id in range(sweep_runs):
 
         if isinstance(mn, int):
             sample = int(round(sample, 0))
+            val_disp = str(sample)
+        else: 
+            val_disp = "%.2g" % sample
 
         params[param] = sample
+        name += "-" + config[0] + val_disp
 
-    name = sweep_name + "_" + str(run_id)
     flags = ""
     for param in params:
         value = params[param]
         val_str = ""
         flags += " --" + param + " " + str(value)
-        if param not in FIXED_PARAMETERS:
-            if isinstance(value, int):
-                val_disp = str(value)
-            else:
-                val_disp = "%.2g" % value
-            name += "-" + param + val_disp
+
     flags += " --experiment_name " + name
     if NYU_NON_PBS:
         print "cd spinn/python; python2.7 -m spinn.models.fat_classifier " + flags
