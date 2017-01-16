@@ -449,6 +449,8 @@ class BaseModel(Chain):
                  use_encode=False,
                  use_skips=False,
                  use_sentence_pair=False,
+                 use_difference_feature=False,
+                 use_product_feature=False,
                  num_mlp_layers=2,
                  mlp_bn=False,
                  **kwargs
@@ -459,6 +461,10 @@ class BaseModel(Chain):
 
         mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
 
+        self.use_difference_feature = use_difference_feature
+        self.use_product_feature = use_product_feature
+        self.model_dim = model_dim
+        
         # Initialize Classifier Parameters
         self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
         self.mlp_input_dim = mlp_input_dim
@@ -473,7 +479,6 @@ class BaseModel(Chain):
         self.initial_embeddings = initial_embeddings
         self.classifier_dropout_rate = 1. - classifier_keep_rate
         self.word_embedding_dim = word_embedding_dim
-        self.model_dim = model_dim
         self.use_reinforce = use_reinforce
         self.use_encode = use_encode
         self.transition_weight = transition_weight
@@ -518,6 +523,10 @@ class BaseModel(Chain):
 
     def init_mlp(self, mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn):
         features_dim = mlp_input_dim
+        if self.use_difference_feature:
+            features_dim += self.model_dim
+        if self.use_product_feature:
+            features_dim += self.model_dim
         for i in range(num_mlp_layers):
             self.add_link('l{}'.format(i), L.Linear(features_dim, mlp_dim))
             if mlp_bn:
@@ -575,6 +584,16 @@ class BaseModel(Chain):
 
     def run_mlp(self, h, train):
         # Pass through MLP Classifier.
+        if self.use_difference_feature or self.use_product_feature:
+            batch_size, h_dim = h.shape[:2]
+            prem, hyp = h[:, :h_dim/2], h[:, h_dim/2:]
+
+        if self.use_difference_feature:
+            h = F.concat([h, prem - hyp], axis=1)
+        
+        if self.use_product_feature:
+            h = F.concat([h, prem * hyp], axis=1)
+
         h = to_gpu(h)
         for i in range(self.num_mlp_layers):
             layer = getattr(self, 'l{}'.format(i))
