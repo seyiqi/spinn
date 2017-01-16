@@ -549,9 +549,9 @@ if __name__ == '__main__':
     gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
     gflags.DEFINE_integer("num_mlp_layers", 2, "")
     gflags.DEFINE_boolean("mlp_bn", True, "Use batch normalization within semantic classifier.")
-    gflags.DEFINE_boolean("use_difference_feature", False,
+    gflags.DEFINE_boolean("use_difference_feature", True,
         "Supply the sentence pair classifier with sentence difference features.")
-    gflags.DEFINE_boolean("use_product_feature", False,
+    gflags.DEFINE_boolean("use_product_feature", True,
         "Supply the sentence pair classifier with sentence product features.")
 
     # Optimization settings.
