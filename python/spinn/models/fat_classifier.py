@@ -61,6 +61,8 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              use_skips=FLAGS.use_skips,
              use_encode=FLAGS.use_encode,
              projection_dim=FLAGS.projection_dim,
+             use_difference_feature=FLAGS.use_difference_feature,
+             use_product_feature=FLAGS.use_product_feature,
             )
 
     classifier_trainer = trainer_cls(model, gpu=gpu)
@@ -547,6 +549,10 @@ if __name__ == '__main__':
     gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
     gflags.DEFINE_integer("num_mlp_layers", 2, "")
     gflags.DEFINE_boolean("mlp_bn", True, "Use batch normalization within semantic classifier.")
+    gflags.DEFINE_boolean("use_difference_feature", False,
+        "Supply the sentence pair classifier with sentence difference features.")
+    gflags.DEFINE_boolean("use_product_feature", False,
+        "Supply the sentence pair classifier with sentence product features.")
 
     # Optimization settings.
     gflags.DEFINE_integer("training_steps", 500000, "Stop training after this point.")
