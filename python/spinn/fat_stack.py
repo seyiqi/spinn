@@ -432,7 +432,7 @@ class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
                  input_keep_rate, classifier_keep_rate,
-                 use_tracker_dropout=True, tracker_dropout_rate=0.1,
+                 use_tracker_dropout=True, tracker_keep_rate=0.9,
                  use_input_dropout=False, use_input_norm=False,
                  gpu=-1,
                  tracking_lstm_hidden_dim=4,
@@ -491,7 +491,7 @@ class BaseModel(Chain):
             'use_input_dropout': use_input_dropout,
             'use_input_norm': use_input_norm,
             'use_tracker_dropout': use_tracker_dropout,
-            'tracker_dropout_rate': tracker_dropout_rate,
+            'tracker_dropout_rate': 1. - tracker_keep_rate,
         }
         args = argparse.Namespace(**args)
 
