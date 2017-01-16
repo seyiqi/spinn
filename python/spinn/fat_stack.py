@@ -26,7 +26,8 @@ from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipp
 from spinn.util.chainer_blocks import LSTMState, Embed, Reduce
 from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
-from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm, expand_along
+from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu
+from spinn.util.chainer_blocks import treelstm, expand_along, dropout
 from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
@@ -42,12 +43,6 @@ def HeKaimingInit(shape, real_shape=None):
 
     return np.random.normal(scale=np.sqrt(4.0/(fan[0] + fan[1])),
                             size=shape)
-
-
-def dropout(inp, ratio, train):
-    if ratio > 0:
-        return F.dropout(inp, ratio, train)
-    return inp
 
 
 class SentencePairTrainer(BaseSentencePairTrainer):
@@ -437,7 +432,7 @@ class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
                  input_keep_rate, classifier_keep_rate,
-                 use_tracker_dropout=True, tracker_dropout_rate=0.1,
+                 use_tracker_dropout=True, tracker_keep_rate=0.9,
                  use_input_dropout=False, use_input_norm=False,
                  gpu=-1,
                  tracking_lstm_hidden_dim=4,
@@ -461,9 +456,11 @@ class BaseModel(Chain):
 
         mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
 
-        self.use_difference_feature = use_difference_feature
-        self.use_product_feature = use_product_feature
         self.model_dim = model_dim
+
+        # Only enable vector comparison features for sentence_pair data.
+        self.use_difference_feature = (use_difference_feature and use_sentence_pair)
+        self.use_product_feature = (use_product_feature and use_sentence_pair)
         
         # Initialize Classifier Parameters
         self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
@@ -494,7 +491,7 @@ class BaseModel(Chain):
             'use_input_dropout': use_input_dropout,
             'use_input_norm': use_input_norm,
             'use_tracker_dropout': use_tracker_dropout,
-            'tracker_dropout_rate': tracker_dropout_rate,
+            'tracker_dropout_rate': 1. - tracker_keep_rate,
         }
         args = argparse.Namespace(**args)
 
@@ -540,7 +537,7 @@ class BaseModel(Chain):
 
 
     def run_embed(self, example, train):
-        embeds = self.embed(example.tokens)
+        embeds = self.embed(example.tokens, train)
 
         b, l = example.tokens.shape[:2]
 

@@ -48,7 +48,7 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              classifier_keep_rate=FLAGS.semantic_classifier_keep_rate,
              use_input_dropout=FLAGS.use_input_dropout,
              use_input_norm=FLAGS.use_input_norm,
-             tracker_dropout_rate=FLAGS.tracker_dropout_rate,
+             tracker_keep_rate=FLAGS.tracker_keep_rate,
              use_tracker_dropout=FLAGS.use_tracker_dropout,
              tracking_lstm_hidden_dim=FLAGS.tracking_lstm_hidden_dim,
              transition_weight=FLAGS.transition_weight,
@@ -353,6 +353,8 @@ def run(only_forward=False):
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
+            xent_loss *= FLAGS.y_lambda
+
             accum_class_preds.append(y.data.argmax(axis=1))
             accum_class_truth.append(y_batch)
 
@@ -525,6 +527,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("mlp_dim", 1024, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
+    gflags.DEFINE_float("y_lambda", 1.0, "Linear scale for classification loss.")
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
@@ -546,7 +549,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_input_dropout", False, "Apply dropout to transformed embeddings.")
     gflags.DEFINE_boolean("use_input_norm", False, "Apply batch normalization to transformed embeddings.")
     gflags.DEFINE_boolean("use_tracker_dropout", False, "Apply dropout to the input of the tracker.")
-    gflags.DEFINE_float("tracker_dropout_rate", 0.1, "Dropout rate for tracker input.")
+    gflags.DEFINE_float("tracker_keep_rate", 0.9, "Keep rate for tracker input dropout.")
     gflags.DEFINE_integer("num_mlp_layers", 2, "")
     gflags.DEFINE_boolean("mlp_bn", True, "Use batch normalization within semantic classifier.")
     gflags.DEFINE_boolean("use_difference_feature", True,
