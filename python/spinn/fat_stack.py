@@ -128,8 +128,7 @@ class Tracker(Chain):
 
 class SPINN(Chain):
 
-    def __init__(self, args, vocab, normalization=L.BatchNormalization,
-                 use_reinforce=True, use_skips=False):
+    def __init__(self, args, vocab, normalization=L.BatchNormalization, use_skips=False):
         super(SPINN, self).__init__(
             reduce=Reduce(args.size, args.tracker_size))
         if args.tracker_size is not None:
@@ -139,15 +138,14 @@ class SPINN(Chain):
                 use_tracker_dropout=args.use_tracker_dropout,
                 tracker_dropout_rate=args.tracker_dropout_rate, use_skips=use_skips))
         self.transition_weight = args.transition_weight
-        self.use_reinforce = use_reinforce
         self.use_skips = use_skips
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
         self.choices = np.array(choices, dtype=np.int32)
 
-        if self.use_reinforce:
-            self.reinforce_lr = 0.01
-            self.mu = 0.1
-            self.add_persistent('baseline', 0)
+        # RL Params
+        self.reinforce_lr = 0.01
+        self.mu = 0.1
+        self.add_persistent('baseline', 0)
 
     def __call__(self, example, print_transitions=False, use_internal_parser=False,
                  validate_transitions=True, use_random=False, use_reinforce=False):
@@ -438,7 +436,6 @@ class BaseModel(Chain):
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
-                 use_reinforce=False,
                  projection_dim=None,
                  encoding_dim=None,
                  use_encode=False,
@@ -476,7 +473,6 @@ class BaseModel(Chain):
         self.initial_embeddings = initial_embeddings
         self.classifier_dropout_rate = 1. - classifier_keep_rate
         self.word_embedding_dim = word_embedding_dim
-        self.use_reinforce = use_reinforce
         self.use_encode = use_encode
         self.transition_weight = transition_weight
 
@@ -508,8 +504,7 @@ class BaseModel(Chain):
                         use_input_norm=args.use_input_norm,
                         ))
 
-        self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
-                 use_reinforce=use_reinforce, use_skips=use_skips))
+        self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization, use_skips=use_skips))
 
         if self.use_encode:
             # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather

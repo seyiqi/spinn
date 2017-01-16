@@ -57,7 +57,6 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              num_mlp_layers=FLAGS.num_mlp_layers,
              mlp_bn=FLAGS.mlp_bn,
              gpu=gpu,
-             use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
              use_encode=FLAGS.use_encode,
              projection_dim=FLAGS.projection_dim,
