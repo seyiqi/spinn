@@ -57,7 +57,6 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              num_mlp_layers=FLAGS.num_mlp_layers,
              mlp_bn=FLAGS.mlp_bn,
              gpu=gpu,
-             use_reinforce=FLAGS.use_reinforce,
              use_skips=FLAGS.use_skips,
              use_encode=FLAGS.use_encode,
              projection_dim=FLAGS.projection_dim,
@@ -350,6 +349,7 @@ def run(only_forward=False):
                     validate_transitions=FLAGS.validate_transitions,
                     use_internal_parser=FLAGS.use_internal_parser,
                     use_reinforce=FLAGS.use_reinforce,
+                    rl_style=FLAGS.rl_style,
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
@@ -531,7 +531,7 @@ if __name__ == '__main__':
     gflags.DEFINE_float("transition_weight", None, "")
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
-    gflags.DEFINE_boolean("xent_reward", False, "Use cross entropy instead of accuracy as RL reward")
+    gflags.DEFINE_enum("rl_style", "zero-one", ["zero-one", "xent"], "Specify REINFORCE configuration.")
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")

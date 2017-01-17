@@ -128,8 +128,7 @@ class Tracker(Chain):
 
 class SPINN(Chain):
 
-    def __init__(self, args, vocab, normalization=L.BatchNormalization,
-                 use_reinforce=True, use_skips=False):
+    def __init__(self, args, vocab, normalization=L.BatchNormalization, use_skips=False):
         super(SPINN, self).__init__(
             reduce=Reduce(args.size, args.tracker_size))
         if args.tracker_size is not None:
@@ -139,18 +138,17 @@ class SPINN(Chain):
                 use_tracker_dropout=args.use_tracker_dropout,
                 tracker_dropout_rate=args.tracker_dropout_rate, use_skips=use_skips))
         self.transition_weight = args.transition_weight
-        self.use_reinforce = use_reinforce
         self.use_skips = use_skips
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
         self.choices = np.array(choices, dtype=np.int32)
 
-        if self.use_reinforce:
-            self.reinforce_lr = 0.01
-            self.mu = 0.1
-            self.add_persistent('baseline', 0)
+        # RL Params
+        self.reinforce_lr = 0.01
+        self.mu = 0.1
+        self.add_persistent('baseline', 0)
 
     def __call__(self, example, print_transitions=False, use_internal_parser=False,
-                 validate_transitions=True, use_random=False, use_reinforce=False):
+                 validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
         self.buffers_t = [0 for buf in self.bufs]
@@ -168,6 +166,7 @@ class SPINN(Chain):
                         validate_transitions=validate_transitions,
                         use_random=use_random,
                         use_reinforce=use_reinforce,
+                        rl_style=rl_style,
                         )
 
     def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
@@ -189,7 +188,7 @@ class SPINN(Chain):
         return preds
 
     def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
-            validate_transitions=True, use_random=False, use_reinforce=False):
+            validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
         transition_loss, transition_acc = 0, 0
         if hasattr(self, 'transitions'):
             num_transitions = self.transitions.shape[1]
@@ -438,7 +437,6 @@ class BaseModel(Chain):
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
-                 use_reinforce=False,
                  projection_dim=None,
                  encoding_dim=None,
                  use_encode=False,
@@ -476,7 +474,6 @@ class BaseModel(Chain):
         self.initial_embeddings = initial_embeddings
         self.classifier_dropout_rate = 1. - classifier_keep_rate
         self.word_embedding_dim = word_embedding_dim
-        self.use_reinforce = use_reinforce
         self.use_encode = use_encode
         self.transition_weight = transition_weight
 
@@ -508,8 +505,7 @@ class BaseModel(Chain):
                         use_input_norm=args.use_input_norm,
                         ))
 
-        self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization,
-                 use_reinforce=use_reinforce, use_skips=use_skips))
+        self.add_link('spinn', SPINN(args, vocab, normalization=L.BatchNormalization, use_skips=use_skips))
 
         if self.use_encode:
             # TODO: Could probably have a buffer that is [concat(embed, fwd, bwd)] rather
@@ -562,7 +558,7 @@ class BaseModel(Chain):
 
 
     def run_spinn(self, example, train, use_internal_parser,
-                  validate_transitions=True, use_random=False, use_reinforce=False):
+                  validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
         r = reporter.Reporter()
         r.add_observer('spinn', self.spinn)
         observation = {}
@@ -572,6 +568,7 @@ class BaseModel(Chain):
                                    validate_transitions=validate_transitions,
                                    use_random=use_random,
                                    use_reinforce=use_reinforce,
+                                   rl_style=rl_style,
                                    )
 
         transition_acc = observation.get('spinn/transition_accuracy', 0.0)
@@ -606,14 +603,14 @@ class BaseModel(Chain):
         return y
 
 
-    def __call__(self, sentences, transitions, y_batch=None, train=True, use_reinforce=False,
+    def __call__(self, sentences, transitions, y_batch=None, train=True, use_reinforce=False, rl_style="zero-one",
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         example = self.build_example(sentences, transitions, train)
         assert example.tokens.data.min() >= 0
         assert y_batch.min() >= 0
         example = self.run_embed(example, train)
         h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser,
-            validate_transitions, use_random, use_reinforce=use_reinforce)
+            validate_transitions, use_random, use_reinforce=use_reinforce, rl_style=rl_style)
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
@@ -623,7 +620,7 @@ class BaseModel(Chain):
         if train and use_reinforce:
             # TODO (Alex): Why would this have needed to be negative?
             # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
-            rewards = self.build_rewards(y, y_batch)
+            rewards = self.build_rewards(y, y_batch, rl_style)
             transition_loss = self.spinn.reinforce(rewards)
             transition_loss *= self.transition_weight
 
@@ -671,9 +668,11 @@ class SentencePairModel(BaseModel):
         return example
 
 
-    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False, use_reinforce=False):
+    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True,
+                  use_random=False, use_reinforce=False, rl_style="zero-one"):
         h_both, transition_acc, transition_loss = super(SentencePairModel, self).run_spinn(
-            example, train, use_internal_parser, validate_transitions, use_random, use_reinforce=use_reinforce)
+            example, train, use_internal_parser, validate_transitions,
+            use_random, use_reinforce=use_reinforce, rl_style=rl_style)
         batch_size = len(h_both) / 2
         h_premise = F.concat(h_both[:batch_size], axis=0)
         h_hypothesis = F.concat(h_both[batch_size:], axis=0)
@@ -700,8 +699,10 @@ class SentenceModel(BaseModel):
         return example
 
 
-    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True, use_random=False, use_reinforce=False):
+    def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True,
+                  use_random=False, use_reinforce=False, rl_style="zero-one"):
         h, transition_acc, transition_loss = super(SentenceModel, self).run_spinn(
-            example, train, use_internal_parser, validate_transitions, use_random, use_reinforce=use_reinforce)
+            example, train, use_internal_parser, validate_transitions,
+            use_random, use_reinforce=use_reinforce, rl_style=rl_style)
         h = F.concat(h, axis=0)
         return h, transition_acc, transition_loss
