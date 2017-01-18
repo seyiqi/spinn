@@ -407,7 +407,7 @@ class Embed(Chain):
 
     def __init__(self, size, vocab_size, dropout, vectors, normalization=None,
                  make_buffers=True, activation=None,
-                 use_input_dropout=False, use_input_norm=False):
+                 use_input_norm=False):
         size = 2 * size if make_buffers else size
         if vectors is None:
             super(Embed, self).__init__(embed=L.EmbedID(vocab_size, size))
@@ -419,7 +419,6 @@ class Embed(Chain):
         self.dropout = dropout
         self.make_buffers = make_buffers
         self.activation = (lambda x: x) if activation is None else activation
-        self.use_input_dropout = use_input_dropout
         self.use_input_norm = use_input_norm
 
     def __call__(self, tokens, train):
@@ -454,9 +453,7 @@ class Embed(Chain):
 
         if self.use_input_norm:
             embeds = self.normalization(embeds, embeds.volatile == 'on')
-
-        if self.use_input_dropout:
-            embeds = dropout(embeds, self.dropout, train)
+        embeds = dropout(embeds, self.dropout, train)
 
         return to_cpu(embeds)
 

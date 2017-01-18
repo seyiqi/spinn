@@ -72,7 +72,7 @@ class SentenceTrainer(SentencePairTrainer):
 
 class Tracker(Chain):
 
-    def __init__(self, size, tracker_size, predict, use_tracker_dropout=True, tracker_dropout_rate=0.1, use_skips=False):
+    def __init__(self, size, tracker_size, predict, tracker_dropout_rate=0.0, use_skips=False):
         super(Tracker, self).__init__(
             lateral=L.Linear(tracker_size, 4 * tracker_size),
             buf=L.Linear(size, 4 * tracker_size, nobias=True),
@@ -82,16 +82,15 @@ class Tracker(Chain):
             self.add_link('transition', L.Linear(tracker_size, 3 if use_skips else 2))
         self.state_size = tracker_size
         self.tracker_dropout_rate = tracker_dropout_rate
-        self.use_tracker_dropout = use_tracker_dropout
         self.reset_state()
 
     def reset_state(self):
         self.c = self.h = None
 
-    def __call__(self, bufs, stacks):
+    def __call__(self, bufs, stacks, train):
         self.batch_size = len(bufs)
         zeros = Variable(np.zeros(bufs[0][0].shape, dtype=bufs[0][0].data.dtype),
-                         volatile='auto')
+                         volatile=not train)
         buf = bundle(buf[-1] for buf in bufs)
         stack1 = bundle(stack[-1] if len(stack) > 0 else zeros for stack in stacks)
         stack2 = bundle(stack[-2] if len(stack) > 1 else zeros for stack in stacks)
@@ -105,10 +104,9 @@ class Tracker(Chain):
             self.c = Variable(
                 self.xp.zeros((self.batch_size, self.state_size),
                               dtype=lstm_in.data.dtype),
-                volatile='auto')
+                volatile=not train)
 
-        if self.use_tracker_dropout:
-            lstm_in = dropout(lstm_in, self.tracker_dropout_rate, train=lstm_in.volatile == False)
+        lstm_in = dropout(lstm_in, self.tracker_dropout_rate, train=train)
 
         self.c, self.h = F.lstm(self.c, lstm_in)
         if hasattr(self, 'transition'):
@@ -135,7 +133,6 @@ class SPINN(Chain):
             self.add_link('tracker', Tracker(
                 args.size, args.tracker_size,
                 predict=args.transition_weight is not None,
-                use_tracker_dropout=args.use_tracker_dropout,
                 tracker_dropout_rate=args.tracker_dropout_rate, use_skips=use_skips))
         self.transition_weight = args.transition_weight
         self.use_skips = use_skips
@@ -147,7 +144,7 @@ class SPINN(Chain):
         self.mu = 0.1
         self.add_persistent('baseline', 0)
 
-    def __call__(self, example, print_transitions=False, use_internal_parser=False,
+    def __call__(self, example, train, print_transitions=False, use_internal_parser=False,
                  validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
@@ -161,7 +158,7 @@ class SPINN(Chain):
             self.tracker.reset_state()
         if hasattr(example, 'transitions'):
             self.transitions = example.transitions
-        return self.run(run_internal_parser=True,
+        return self.run(train, run_internal_parser=True,
                         use_internal_parser=use_internal_parser,
                         validate_transitions=validate_transitions,
                         use_random=use_random,
@@ -169,25 +166,7 @@ class SPINN(Chain):
                         rl_style=rl_style,
                         )
 
-    def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
-        DEFAULT_CHOICE = T_SHIFT
-        cant_skip = np.array([p == T_SKIP and t != T_SKIP for t, p in zip(transitions, preds)])
-        preds[cant_skip] = DEFAULT_CHOICE
-
-        # Cannot reduce on too small a stack
-        must_shift = np.array([len(stack) < 2 for stack in stacks])
-        preds[must_shift] = T_SHIFT
-
-        # Cannot shift if stack has to be reduced
-        must_reduce = np.array([buf_t >= buf_n for buf_t, buf_n in zip(buffers_t, buffers_n)])
-        preds[must_reduce] = T_REDUCE
-
-        must_skip = np.array([t == T_SKIP for t in transitions])
-        preds[must_skip] = T_SKIP
-
-        return preds
-
-    def run(self, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
+    def run(self, train, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
             validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
         transition_loss, transition_acc = 0, 0
         if hasattr(self, 'transitions'):
@@ -204,7 +183,7 @@ class SPINN(Chain):
 
             cant_skip = np.array([t != T_SKIP for t in transitions])
             if hasattr(self, 'tracker') and (self.use_skips or sum(cant_skip) > 0):
-                transition_hyp = self.tracker(self.bufs, self.stacks)
+                transition_hyp = self.tracker(self.bufs, self.stacks, train)
                 if transition_hyp is not None and run_internal_parser:
                     transition_hyp = to_cpu(transition_hyp)
                     if hasattr(self, 'transitions'):
@@ -277,7 +256,7 @@ class SPINN(Chain):
                         else:
                             zeros = Variable(np.zeros(buf[0].shape,
                                 dtype=buf[0].data.dtype),
-                                volatile='auto')
+                                volatile=not train)
                             lr.append(zeros)
                     trackings.append(tracking)
                 else: # skip
@@ -311,6 +290,25 @@ class SPINN(Chain):
             transition_loss = None
 
         return [stack[-1] for stack in self.stacks], transition_loss
+
+
+    def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
+        DEFAULT_CHOICE = T_SHIFT
+        cant_skip = np.array([p == T_SKIP and t != T_SKIP for t, p in zip(transitions, preds)])
+        preds[cant_skip] = DEFAULT_CHOICE
+
+        # Cannot reduce on too small a stack
+        must_shift = np.array([len(stack) < 2 for stack in stacks])
+        preds[must_shift] = T_SHIFT
+
+        # Cannot shift if stack has to be reduced
+        must_reduce = np.array([buf_t >= buf_n for buf_t, buf_n in zip(buffers_t, buffers_n)])
+        preds[must_reduce] = T_REDUCE
+
+        must_skip = np.array([t == T_SKIP for t in transitions])
+        preds[must_skip] = T_SKIP
+
+        return preds
 
 
     def get_statistics(self):
@@ -431,8 +429,8 @@ class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
                  input_keep_rate, classifier_keep_rate,
-                 use_tracker_dropout=True, tracker_keep_rate=0.9,
-                 use_input_dropout=False, use_input_norm=False,
+                 tracker_keep_rate=1.0,
+                 use_input_norm=False,
                  gpu=-1,
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
@@ -485,9 +483,7 @@ class BaseModel(Chain):
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
             'transition_weight': transition_weight,
             'input_dropout_rate': 1. - input_keep_rate,
-            'use_input_dropout': use_input_dropout,
             'use_input_norm': use_input_norm,
-            'use_tracker_dropout': use_tracker_dropout,
             'tracker_dropout_rate': 1. - tracker_keep_rate,
         }
         args = argparse.Namespace(**args)
@@ -501,7 +497,6 @@ class BaseModel(Chain):
         self.add_link('embed',
                     Embed(args.size, vocab.size, args.input_dropout_rate,
                         vectors=vocab.vectors, normalization=L.BatchNormalization,
-                        use_input_dropout=args.use_input_dropout,
                         use_input_norm=args.use_input_norm,
                         ))
 
@@ -563,7 +558,7 @@ class BaseModel(Chain):
         r.add_observer('spinn', self.spinn)
         observation = {}
         with r.scope(observation):
-            h_both, _ = self.spinn(example,
+            h_both, _ = self.spinn(example, train,
                                    use_internal_parser=use_internal_parser,
                                    validate_transitions=validate_transitions,
                                    use_random=use_random,
