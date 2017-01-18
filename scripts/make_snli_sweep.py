@@ -46,7 +46,7 @@ SWEEP_PARAMETERS = {
     "l2_lambda":   		  ("l2", EXP, 8e-7, 2e-5),
     "semantic_classifier_keep_rate": ("skr", LIN, 0.7, 0.95),  # NB: Keep rates may depend considerably on dims.
     "embedding_keep_rate": ("ekr", LIN, 0.7, 0.95),
-    "transition_cost_scale": ("tcs", LIN, 0.5, 4.0),
+    "transition_weight": ("tcs", LIN, 0.5, 4.0),
     "learning_rate_decay_per_10k_steps": ("dec", EXP, 0.5, 1.0),
     "tracking_lstm_hidden_dim": ("tdim", EXP, 24, 128),
     "transition_weight":  ("trwt", EXP, 0.1, 3.0),
