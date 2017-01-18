@@ -9,7 +9,6 @@ from chainer import datasets, iterators, optimizers, serializers
 from chainer import Link, Chain, ChainList
 import chainer.functions as F
 from chainer.functions.connection import embed_id
-from chainer.functions.normalization.batch_normalization import batch_normalization
 from chainer.functions.evaluation import accuracy
 import chainer.links as L
 from chainer.training import extensions
