@@ -25,6 +25,7 @@ from spinn.util.data import SimpleProgressBar
 from spinn.util.chainer_blocks import gradient_check, l2_cost, flatten
 
 import spinn.fat_stack
+import spinn.plain_rnn
 import spinn.cbow
 import spinn.nti
 
@@ -239,7 +240,7 @@ def run(only_forward=False):
     if FLAGS.model_type == "CBOW":
         model_module = spinn.cbow
     elif FLAGS.model_type == "RNN":
-        model_module = spinn.plain_rnn_chainer
+        model_module = spinn.plain_rnn
     elif FLAGS.model_type == "NTI":
         model_module = spinn.nti
     elif FLAGS.model_type == "SPINN":

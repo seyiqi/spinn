@@ -23,7 +23,6 @@ from chainer.utils import type_check
 
 from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
 from spinn.util.chainer_blocks import LSTMState, Embed
-from spinn.util.chainer_blocks import MLP
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm
 
@@ -80,6 +79,10 @@ class BaseModel(Chain):
         super(BaseModel, self).__init__()
 
         the_gpu.gpu = gpu
+
+        # CBOW doesn't use model_dim right now. Let's leave this message here anyway for now, since
+        # word_embedding_dim is effectively the model_dim.
+        assert word_embedding_dim == model_dim, "Currently only supports word_embedding_dim == model_dim"
 
         mlp_input_dim = word_embedding_dim * 2 if use_sentence_pair else word_embedding_dim
         self.add_link('l0', L.Linear(mlp_input_dim, mlp_dim))

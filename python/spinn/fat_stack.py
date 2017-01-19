@@ -22,8 +22,7 @@ from chainer.utils import type_check
 from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
 
 from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping
-from spinn.util.chainer_blocks import LSTMState, Embed, Reduce
-from spinn.util.chainer_blocks import MLP
+from spinn.util.chainer_blocks import LSTMState, Embed, Reduce, LSTMChain
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu
 from spinn.util.chainer_blocks import treelstm, expand_along, dropout
@@ -378,51 +377,6 @@ class SPINN(Chain):
 
         return transition_loss
 
-
-class LSTMChain(Chain):
-    def __init__(self, input_dim, hidden_dim, seq_length, gpu=-1):
-        super(LSTMChain, self).__init__(
-            i_fwd=L.Linear(input_dim, 4 * hidden_dim, nobias=True),
-            h_fwd=L.Linear(hidden_dim, 4 * hidden_dim),
-        )
-        self.seq_length = seq_length
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-
-    def __call__(self, x_batch, train=True, keep_hs=False, reverse=False):
-        batch_size = x_batch.data.shape[0]
-        c = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
-        h = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
-        hs = []
-        batches = F.split_axis(x_batch, self.seq_length, axis=1)
-        if reverse:
-            batches = list(reversed(batches))
-        for x in batches:
-            ii = self.i_fwd(x)
-            hh = self.h_fwd(h)
-            ih = ii + hh
-            c, h = F.lstm(c, ih)
-
-            if keep_hs:
-                # Convert from (#batch_size, #hidden_dim) ->
-                #              (#batch_size, 1, #hidden_dim)
-                # This is important for concatenation later.
-                h_reshaped = F.reshape(h, (batch_size, 1, self.hidden_dim))
-                hs.append(h_reshaped)
-
-        if keep_hs:
-            # This converts list of: [(#batch_size, 1, #hidden_dim)]
-            # To single tensor:       (#batch_size, #seq_length, #hidden_dim)
-            # Which matches the input shape.
-            if reverse:
-                hs = list(reversed(hs))
-            hs = F.concat(hs, axis=1)
-        else:
-            hs = None
-
-        return c, h, hs
 
 class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,

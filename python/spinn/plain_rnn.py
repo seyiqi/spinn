@@ -1,15 +1,13 @@
-""" Chainer-based RNN implementations.
-
-    Important Notes:
-    * setting volatile to OFF during evaluation
-      is a performance boost.
-"""
+from functools import partial
+import argparse
+import itertools
 
 import numpy as np
 from spinn import util
 
 # Chainer imports
 import chainer
+from chainer import reporter, initializers
 from chainer import cuda, Function, gradient_check, report, training, utils, Variable
 from chainer import datasets, iterators, optimizers, serializers
 from chainer import Link, Chain, ChainList
@@ -20,290 +18,141 @@ from chainer.functions.evaluation import accuracy
 import chainer.links as L
 from chainer.training import extensions
 
-# import iptb
+from chainer.functions.activation import slstm
+from chainer.utils import type_check
 
-class LSTMChain(Chain):
-    def __init__(self, input_dim, hidden_dim, seq_length, prefix="LSTMChain", gpu=-1):
-        super(LSTMChain, self).__init__(
-            i_fwd=L.Linear(input_dim, 4 * hidden_dim, nobias=True),
-            h_fwd=L.Linear(hidden_dim, 4 * hidden_dim),
-        )
-        self.seq_length = seq_length
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-
-    def __call__(self, x_batch, train=True, keep_hs=False):
-        batch_size = x_batch.shape[0]
-        c = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
-        h = self.__mod.zeros((batch_size, self.hidden_dim), dtype=self.__mod.float32)
-        hs = []
-        for _x in range(self.seq_length):
-            x = self.__mod.array(x_batch[:, _x].data)
-            x = Variable(x, volatile=not train)
-            ii = self.i_fwd(x)
-            hh = self.h_fwd(h)
-            ih = ii + hh
-            c, h = F.lstm(c, ih)
-
-            if keep_hs:
-                # Convert from (#batch_size, #hidden_dim) ->
-                #              (#batch_size, 1, #hidden_dim)
-                # This is important for concatenation later.
-                h_reshaped = F.reshape(h, (batch_size, 1, self.hidden_dim))
-                hs.append(h_reshaped)
-
-        if keep_hs:
-            # This converts list of: [(#batch_size, 1, #hidden_dim)]
-            # To single tensor:       (#batch_size, #seq_length, #hidden_dim)
-            # Which matches the input shape.
-            hs = F.concat(hs, axis=1)
-        else:
-            hs = None
-
-        return c, h, hs
-
-class RNNChain(Chain):
-    def __init__(self, model_dim, word_embedding_dim, vocab_size,
-                 seq_length,
-                 initial_embeddings,
-                 keep_rate,
-                 prefix="RNNChain",
-                 gpu=-1
-                 ):
-        super(RNNChain, self).__init__(
-            rnn=LSTMChain(word_embedding_dim, model_dim, seq_length, gpu=gpu)
-        )
-
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-        self.keep_rate = keep_rate
-        self.W = self.__mod.array(initial_embeddings, dtype=self.__mod.float32)
-        self.model_dim = model_dim
-        self.word_embedding_dim = word_embedding_dim
-
-    def __call__(self, x_batch, train=True):
-        ratio = 1 - self.keep_rate
-
-        x_batch = Variable(x_batch, volatile=True)
-        x = embed_id.embed_id(x_batch, self.W)
-        x = Variable(x.data, volatile=not train)
-
-        gamma = Variable(self.__mod.array(1.0, dtype=self.__mod.float32), volatile=not train, name='gamma')
-        beta = Variable(self.__mod.array(0.0, dtype=self.__mod.float32),volatile=not train, name='beta')
-
-        x = batch_normalization(x, gamma, beta, eps=2e-5, running_mean=None,running_var=None, decay=0.9, use_cudnn=False)
-        x = F.dropout(x, ratio, train)
-
-        c, h, hs = self.rnn(x, train)
-        return h
-
-class CrossEntropyClassifier(Chain):
-    def __init__(self, gpu=-1):
-        super(CrossEntropyClassifier, self).__init__()
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-
-    def __call__(self, y, y_batch, train=True):
-        accum_loss = 0 if train else None
-        if train:
-            if self.__gpu >= 0:
-                y_batch = cuda.to_gpu(y_batch)
-            y_batch = Variable(y_batch, volatile=not train)
-            accum_loss = F.softmax_cross_entropy(y, y_batch)
-
-        return accum_loss
-
-class MLP(ChainList):
-    def __init__(self, dimensions,
-                 prefix="MLP",
-                 keep_rate=0.5,
-                 gpu=-1,
-                 ):
-        super(MLP, self).__init__()
-        self.keep_rate = keep_rate
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-        self.layers = []
-
-        assert len(dimensions) >= 2, "Must initialize MLP with 2 or more layers."
-        for l0_dim, l1_dim in zip(dimensions[:-1], dimensions[1:]):
-            self.add_link(L.Linear(l0_dim, l1_dim))
-
-    def __call__(self, x_batch, train=True):
-        ratio = 1 - self.keep_rate
-        layers = self.layers
-        h = x_batch
-
-        for l0 in self.children():
-            h = F.dropout(h, ratio, train)
-            h = F.relu(l0(h))
-        y = h
-        return y
-
-class SentenceModel(Chain):
-    """docstring for SentenceModel"""
-    def __init__(self, model_dim, word_embedding_dim, vocab_size, compose_network,
-                 seq_length, initial_embeddings, num_classes,
-                 mlp_dim,
-                 keep_rate,
-                 gpu=-1,
-                 ):
-        super(SentenceModel, self).__init__(
-            x2h=RNNChain(model_dim, word_embedding_dim, vocab_size,
-                    seq_length, initial_embeddings, gpu=gpu, keep_rate=keep_rate),
-            h2y=MLP(dimensions=[model_dim, mlp_dim, num_classes],
-                    keep_rate=keep_rate, gpu=gpu),
-            classifier=CrossEntropyClassifier(gpu),
-        )
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-        self.accFun = accuracy.accuracy
-        self.keep_rate = keep_rate
-
-    def __call__(self, x_batch, y_batch=None, train=True):
-        ratio = (1-self.keep_rate)
-
-        x = x_batch
-        h = self.x2h(x, train=train)
-        y = self.h2y(h, train)
-
-        accum_loss = self.classifier(y, y_batch, train)
-        self.accuracy = self.accFun(y, y_batch)
-
-        return y, accum_loss
+from spinn.util.chainer_blocks import BaseSentencePairTrainer, Reduce
+from spinn.util.chainer_blocks import LSTMState, Embed, LSTMChain
+from spinn.util.chainer_blocks import CrossEntropyClassifier
+from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu, treelstm
 
 
-class SentencePairModel(Chain):
-    def __init__(self, model_dim, word_embedding_dim, vocab_size, compose_network,
-                 seq_length, initial_embeddings, num_classes,
-                 mlp_dim,
-                 keep_rate,
-                 gpu=-1,
-                 ):
-        super(SentencePairModel, self).__init__(
-            x2h_premise=RNNChain(model_dim, word_embedding_dim, vocab_size,
-                    seq_length, initial_embeddings, gpu=gpu, keep_rate=keep_rate),
-            x2h_hypothesis=RNNChain(model_dim, word_embedding_dim, vocab_size,
-                    seq_length, initial_embeddings, gpu=gpu, keep_rate=keep_rate),
-            h2y=MLP(dimensions=[model_dim*2, mlp_dim, mlp_dim/2, num_classes],
-                    keep_rate=keep_rate, gpu=gpu),
-            classifier=CrossEntropyClassifier(gpu),
-        )
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-        self.accFun = accuracy.accuracy
-        self.keep_rate = keep_rate
+def HeKaimingInit(shape, real_shape=None):
+    # Calculate fan-in / fan-out using real shape if given as override
+    fan = real_shape or shape
 
-    def __call__(self, x_batch, y_batch=None, train=True):
-        ratio = 1 - self.keep_rate
+    return np.random.normal(scale=np.sqrt(4.0/(fan[0] + fan[1])),
+                            size=shape)
 
-        h_premise = self.x2h_premise(x_batch[:, :, 0:1], train=train)
-        h_hypothesis = self.x2h_hypothesis(x_batch[:, :, 1:2], train=train)
-        h = F.concat([h_premise, h_hypothesis], axis=1)
 
-        h = F.dropout(h, ratio, train)
-        y = self.h2y(h, train)
-
-        y = F.dropout(y, ratio, train)
-        accum_loss = self.classifier(y, y_batch, train)
-        self.accuracy = self.accFun(y, self.__mod.array(y_batch))
-
-        return y, accum_loss
-
-class RNN(object):
-    """Plain RNN encoder implementation. Can use any activation function.
-    """
-
-    def __init__(self, model_dim, word_embedding_dim, vocab_size, compose_network,
-                 seq_length,
-                 num_classes,
-                 mlp_dim,
-                 keep_rate,
-                 initial_embeddings=None,
-                 use_sentence_pair=False,
-                 gpu=-1,
-                 **kwargs):
-        """Construct an RNN.
-
-        Args:
-            model_dim: Dimensionality of hidden state.
-            vocab_size: Number of unique tokens in vocabulary.
-            compose_network: Blocks-like function which accepts arguments
-              `prev_hidden_state, inp, inp_dim, hidden_dim, vs, name` (see e.g. `util.LSTMLayer`).
-            X: Theano batch describing input matrix, or `None` (in which case
-              this instance will make its own batch variable).
-        """
-
-        self.model_dim = model_dim
-        self.word_embedding_dim = word_embedding_dim
-        self.mlp_dim = mlp_dim
-        self.vocab_size = vocab_size
-        self._compose_network = compose_network
-        self.initial_embeddings = initial_embeddings
-        self.seq_length = seq_length
-        self.keep_rate = keep_rate
-        self.__gpu = gpu
-        self.__mod = cuda.cupy if gpu >= 0 else np
-
-        if use_sentence_pair:
-            self.model = SentencePairModel(
-                model_dim, word_embedding_dim, vocab_size, compose_network,
-                     seq_length, initial_embeddings, num_classes, mlp_dim,
-                     keep_rate,
-                     gpu,
-                    )
-        else:
-            self.model = SentenceModel(
-                model_dim, word_embedding_dim, vocab_size, compose_network,
-                     seq_length, initial_embeddings, num_classes, mlp_dim,
-                     keep_rate,
-                     gpu,
-                    )
-
-        self.init_params()
-        if gpu >= 0:
-            cuda.get_device(gpu).use()
-            self.model.to_gpu()
-
-    def init_params(self):
+class SentencePairTrainer(BaseSentencePairTrainer):
+    def init_params(self, **kwargs):
         for name, param in self.model.namedparams():
             data = param.data
             print("Init: {}:{}".format(name, data.shape))
-            data[:] = np.random.uniform(-0.1, 0.1, data.shape)
+            if len(data.shape) >= 2:
+                data[:] = HeKaimingInit(data.shape)
+            else:
+                data[:] = np.random.uniform(-0.1, 0.1, data.shape)
 
-    def init_optimizer(self, clip, decay, lr=0.001, alpha=0.9, eps=1e-6):
-        self.optimizer = optimizers.RMSprop(lr=lr, alpha=alpha, eps=eps)
+    def init_optimizer(self, lr=0.01, **kwargs):
+        self.optimizer = optimizers.Adam(alpha=lr, beta1=0.9, beta2=0.999, eps=1e-08)
         self.optimizer.setup(self.model)
 
-        # Clip Gradient
-        self.optimizer.add_hook(chainer.optimizer.GradientClipping(clip))
 
-        # L2 Regularization
-        self.optimizer.add_hook(chainer.optimizer.WeightDecay(decay))
+class SentenceTrainer(SentencePairTrainer):
+    pass
 
-    def update(self):
-        self.optimizer.update()
 
-    def forward(self, x_batch, y_batch=None, train=True, predict=False):
-        assert "sentences" in x_batch, \
-            "Input must contain dictionary with sentences."
+class BaseModel(Chain):
+    def __init__(self, model_dim, word_embedding_dim, vocab_size,
+                 seq_length, initial_embeddings, num_classes, mlp_dim,
+                 input_keep_rate, classifier_keep_rate,
+                 use_tracker_dropout=True, tracker_dropout_rate=0.1,
+                 use_input_dropout=False, use_input_norm=False,
+                 use_classifier_norm=True,
+                 gpu=-1,
+                 tracking_lstm_hidden_dim=4,
+                 transition_weight=None,
+                 use_tracking_lstm=True,
+                 use_shift_composition=True,
+                 use_history=False,
+                 save_stack=False,
+                 use_reinforce=False,
+                 projection_dim=None,
+                 encoding_dim=None,
+                 use_encode=False,
+                 use_skips=False,
+                 use_sentence_pair=False,
+                 **kwargs
+                ):
+        super(BaseModel, self).__init__()
 
-        x = x_batch["sentences"]
+        the_gpu.gpu = gpu
 
-        y, loss = self.model(x, y_batch, train=train)
-        if predict:
-            preds = self.__mod.argmax(y.data, 1).tolist()
+        assert word_embedding_dim == model_dim, "Currently only supports word_embedding_dim == model_dim"
+
+        mlp_input_dim = word_embedding_dim * 2 if use_sentence_pair else word_embedding_dim
+        self.add_link('l0', L.Linear(mlp_input_dim, mlp_dim))
+        self.add_link('l1', L.Linear(mlp_dim, mlp_dim))
+        self.add_link('l2', L.Linear(mlp_dim, num_classes))
+
+        self.classifier = CrossEntropyClassifier(gpu)
+        self.__gpu = gpu
+        self.accFun = accuracy.accuracy
+        self.initial_embeddings = initial_embeddings
+
+        vocab_size = initial_embeddings.shape[0] if initial_embeddings is not None else vocab_size
+        self.fix_embed = initial_embeddings is not None
+
+        if initial_embeddings is None:
+            self.add_link('_embed', L.EmbedID(vocab_size, word_embedding_dim))
+
+        self.add_link('fwd_rnn', LSTMChain(input_dim=word_embedding_dim, hidden_dim=model_dim, seq_length=seq_length))
+
+    def embed(self, x, train):
+        if self.fix_embed:
+            return Variable(self.initial_embeddings.take(x, axis=0), volatile=not train)
         else:
-            preds = None
-        return y, loss, preds
+            return self._embed(Variable(x, volatile=not train))
 
-    def save(self, filename):
-        chainer.serializers.save_npz(filename, self.model)
+    def run_mlp(self, h, train):
+        h = self.l0(h)
+        h = F.relu(h)
+        h = self.l1(h)
+        h = F.relu(h)
+        h = self.l2(h)
+        y = h
+        return h
 
-    @staticmethod
-    def load(filename, n_units, gpu):
-        self = SentenceModel(n_units, gpu)
-        chainer.serializers.load_npz(filename, self.model)
-        return self
+
+class SentencePairModel(BaseModel):
+    def __call__(self, sentences, transitions, y_batch=None, train=True, **kwargs):
+        batch_size = sentences.shape[0]
+
+        # Build Tokens
+        x_prem = sentences[:,:,0]
+        x_hyp = sentences[:,:,1]
+
+        embeds_prem = self.embed(x_prem, train)
+        embeds_hyp = self.embed(x_hyp, train)
+
+        _, h_prem, _ = self.fwd_rnn(embeds_prem, train, keep_hs=False)
+        _, h_hyp, _ = self.fwd_rnn(embeds_hyp, train, keep_hs=False)
+        h = F.concat([h_prem, h_hyp], axis=1)
+        y = self.run_mlp(h, train)
+
+        # Calculate Loss & Accuracy.
+        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+        self.accuracy = self.accFun(y, self.xp.array(y_batch))
+
+        return y, accum_loss, self.accuracy.data, 0.0, None
+
+
+class SentenceModel(BaseModel):
+    def __call__(self, sentences, transitions, y_batch=None, train=True, **kwargs):
+        batch_size = sentences.shape[0]
+
+        # Build Tokens
+        x = sentences
+
+        embeds = self.embed(x, train)
+
+        _, h, _ = self.fwd_rnn(embeds, train, keep_hs=False)
+        y = self.run_mlp(h, train)
+
+        # Calculate Loss & Accuracy.
+        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+        self.accuracy = self.accFun(y, self.xp.array(y_batch))
+
+        return y, accum_loss, self.accuracy.data, 0.0, None
