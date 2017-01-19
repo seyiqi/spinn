@@ -456,6 +456,7 @@ class BaseModel(Chain):
         # Only enable vector comparison features for sentence_pair data.
         self.use_difference_feature = (use_difference_feature and use_sentence_pair)
         self.use_product_feature = (use_product_feature and use_sentence_pair)
+        self.use_sentence_pair = use_sentence_pair
         
         # Initialize Classifier Parameters
         self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
@@ -572,15 +573,19 @@ class BaseModel(Chain):
 
     def run_mlp(self, h, train):
         # Pass through MLP Classifier.
-        batch_size, h_dim = h.shape[:2]
-        prem, hyp = h[:, :h_dim / 4], h[:, h_dim / 2:3 * h_dim / 4]
-        h = F.concat([prem, hyp], axis=1)  # Strip off 'c' states.   
+        batch_size = h.shape[:2]
 
-        if self.use_difference_feature:
-            h = F.concat([h, prem - hyp], axis=1)
-        
-        if self.use_product_feature:
-            h = F.concat([h, prem * hyp], axis=1)
+        if self.use_sentence_pair:
+            prem, hyp = h[:, :self.stack_hidden_dim], h[:, self.stack_hidden_dim*2:self.stack_hidden_dim*3]
+            h = F.concat([prem, hyp], axis=1)  # Strip off 'c' states.   
+            if self.use_difference_feature:
+                h = F.concat([h, prem - hyp], axis=1)
+            
+            if self.use_product_feature:
+                h = F.concat([h, prem * hyp], axis=1)
+
+        else:
+            h = h[:, :self.stack_hidden_dim]  # Strip off 'c' states.   
 
         h = to_gpu(h)
         for i in range(self.num_mlp_layers):
