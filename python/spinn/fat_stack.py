@@ -612,21 +612,19 @@ class BaseModel(Chain):
         self.accuracy = self.accFun(y, self.__mod.array(y_batch))
 
         if train and use_reinforce:
-            # TODO (Alex): Why would this have needed to be negative?
-            # rewards = - np.array([float(F.softmax_cross_entropy(y[i:(i+1)], y_batch[i:(i+1)]).data) for i in range(y_batch.shape[0])])
             rewards = self.build_rewards(y, y_batch, rl_style)
             transition_loss = self.spinn.reinforce(rewards)
             transition_loss *= self.transition_weight
 
         if hasattr(transition_acc, 'data'):
-          transition_acc = transition_acc.data
+            transition_acc = transition_acc.data
 
         return y, accum_loss, self.accuracy.data, transition_acc, transition_loss
 
 
     def build_rewards(self, logits, y, style="zero-one"):
         if style == "xent":
-            rewards = F.concat([F.expand_dims(
+            rewards = -1. * F.concat([F.expand_dims(
                         F.softmax_cross_entropy(logits[i:(i+1)], y[i:(i+1)]), axis=0)
                         for i in range(y.shape[0])], axis=0).data
         elif style == "zero-one":
