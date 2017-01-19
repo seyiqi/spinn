@@ -403,13 +403,14 @@ class BaseModel(Chain):
 
         the_gpu.gpu = gpu
 
-        mlp_input_dim = model_dim * 2 if use_sentence_pair else model_dim
-
         self.model_dim = model_dim
+        self.stack_hidden_dim = model_dim / 2
+        mlp_input_dim = self.stack_hidden_dim * 2 if use_sentence_pair else self.stack_hidden_dim
 
         # Only enable vector comparison features for sentence_pair data.
         self.use_difference_feature = (use_difference_feature and use_sentence_pair)
         self.use_product_feature = (use_product_feature and use_sentence_pair)
+        self.use_sentence_pair = use_sentence_pair
         
         # Initialize Classifier Parameters
         self.init_mlp(mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn)
@@ -429,7 +430,7 @@ class BaseModel(Chain):
         self.transition_weight = transition_weight
 
         if projection_dim <= 0 or not self.use_encode:
-            projection_dim = model_dim/2
+            projection_dim = self.stack_hidden_dim
 
         args = {
             'size': projection_dim,
@@ -465,9 +466,9 @@ class BaseModel(Chain):
     def init_mlp(self, mlp_input_dim, mlp_dim, num_classes, num_mlp_layers, mlp_bn):
         features_dim = mlp_input_dim
         if self.use_difference_feature:
-            features_dim += self.model_dim
+            features_dim += self.stack_hidden_dim
         if self.use_product_feature:
-            features_dim += self.model_dim
+            features_dim += self.stack_hidden_dim
         for i in range(num_mlp_layers):
             self.add_link('l{}'.format(i), L.Linear(features_dim, mlp_dim))
             if mlp_bn:
@@ -526,15 +527,19 @@ class BaseModel(Chain):
 
     def run_mlp(self, h, train):
         # Pass through MLP Classifier.
-        if self.use_difference_feature or self.use_product_feature:
-            batch_size, h_dim = h.shape[:2]
-            prem, hyp = h[:, :h_dim/2], h[:, h_dim/2:]
+        batch_size = h.shape[:2]
 
-        if self.use_difference_feature:
-            h = F.concat([h, prem - hyp], axis=1)
-        
-        if self.use_product_feature:
-            h = F.concat([h, prem * hyp], axis=1)
+        if self.use_sentence_pair:
+            prem, hyp = h[:, :self.stack_hidden_dim], h[:, self.stack_hidden_dim*2:self.stack_hidden_dim*3]
+            h = F.concat([prem, hyp], axis=1)  # Strip off 'c' states.   
+            if self.use_difference_feature:
+                h = F.concat([h, prem - hyp], axis=1)
+            
+            if self.use_product_feature:
+                h = F.concat([h, prem * hyp], axis=1)
+
+        else:
+            h = h[:, :self.stack_hidden_dim]  # Strip off 'c' states.   
 
         h = to_gpu(h)
         for i in range(self.num_mlp_layers):
