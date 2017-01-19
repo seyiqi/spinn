@@ -389,9 +389,15 @@ def run(only_forward=False):
             classifier_trainer.update()
 
             if FLAGS.use_lr_decay:
-                # Update Learning Rate
-                learning_rate = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
-                classifier_trainer.optimizer.lr = learning_rate
+                try:
+                    # Update Learning Rate
+                    learning_rate = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
+                    classifier_trainer.optimizer.lr = learning_rate
+                except AttributeError:
+                    # Some optimizers (like Adam) do not allow you to set learning rate this way.
+                    # Fortunately, they tend to have some sort of built-in decay.
+                    pass
+
 
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
