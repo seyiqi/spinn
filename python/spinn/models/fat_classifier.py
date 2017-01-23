@@ -129,7 +129,7 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 sentence = eval_X_batch[ii]
                 ground_truth = eval_transitions_batch[ii]
                 predicted = all_preds[ii]
-                parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=True))
+                evalb_parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=True))
                 parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=False))
 
         # Print Progress
@@ -138,13 +138,16 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
 
     # Print Trees to file for use in Error Analysis
     if FLAGS.print_tree:
-        with open("{}.trees.gld", "w") as f:
+        gld_filename = "{}.trees.gld".format(FLAGS.experiment_name)
+        tst_filename = "{}.trees.tst".format(FLAGS.experiment_name)
+        both_filename = "{}.trees.txt".format(FLAGS.experiment_name)
+        with open(gld_filename, "w") as f:
             for ground_truth_tree, predicted_tree in evalb_parses:
                 f.write("(S {})\n".format(ground_truth_tree))
-        with open("{}.trees.tst", "w") as f:
+        with open(tst_filename, "w") as f:
             for ground_truth_tree, predicted_tree in evalb_parses:
                 f.write("(S {})\n".format(predicted_tree))
-        with open("{}.trees.txt".format(FLAGS.experiment_name), "w") as f:
+        with open(both_filename, "w") as f:
             for ground_truth_tree, predicted_tree in parses:
                 f.write("{}\t{}\n".format(ground_truth_tree, predicted_tree))
 
@@ -300,6 +303,15 @@ def run(only_forward=False):
         train_summary_logger = TFLogger(summary_dir=os.path.join(FLAGS.summary_dir, FLAGS.experiment_name, 'train'))
         dev_summary_logger = TFLogger(summary_dir=os.path.join(FLAGS.summary_dir, FLAGS.experiment_name, 'dev'))
 
+    # Setup Trainer
+    classifier_trainer.init_optimizer(
+        lr=FLAGS.learning_rate,
+        clip=FLAGS.clipping_max_value,
+        opt=FLAGS.opt,
+        )
+
+    model = classifier_trainer.optimizer.target
+
     # Do an evaluation-only run.
     if only_forward:
         for index, eval_set in enumerate(eval_iterators):
@@ -310,14 +322,6 @@ def run(only_forward=False):
     else:
          # Train
         logger.Log("Training.")
-
-        classifier_trainer.init_optimizer(
-            lr=FLAGS.learning_rate,
-            clip=FLAGS.clipping_max_value,
-            opt=FLAGS.opt,
-            )
-
-        model = classifier_trainer.optimizer.target
 
         # New Training Loop
         progress_bar = SimpleProgressBar(msg="Training", bar_length=60, enabled=FLAGS.show_progress_bar)
