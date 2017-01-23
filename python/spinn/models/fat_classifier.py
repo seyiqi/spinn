@@ -122,15 +122,42 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
             all_preds = [el['preds'] for el in memories]
             all_preds = zip(*all_preds)
 
+            if len(all_preds) == FLAGS.batch_size:
+                use_sentence_pair = False
+            elif len(all_preds) == FLAGS.batch_size * 2:
+                use_sentence_pair = True
+            else:
+                raise Exception("Unexpected number of predictions.")
+
             if vocabulary is not None:
                 inv_vocab = {v: k for k, v in vocabulary.iteritems()}
             
             for ii in range(len(eval_X_batch)):
                 sentence = eval_X_batch[ii]
                 ground_truth = eval_transitions_batch[ii]
-                predicted = all_preds[ii]
-                evalb_parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=True))
-                parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=False))
+                num_t = eval_num_transitions_batch[ii]
+
+                if use_sentence_pair:
+                    if num_t[0] <= FLAGS.seq_length:
+                        # Premise
+                        sent_prem = sentence[:, 0]
+                        gt_prem = ground_truth[:, 0]
+                        pred_prem = all_preds[ii]
+                        evalb_parses.append(print_tree(sent_prem, gt_prem, pred_prem, inv_vocab, evalb=True))
+                        parses.append(print_tree(sent_prem, gt_prem, pred_prem, inv_vocab, evalb=False))
+
+                    if num_t[1] <= FLAGS.seq_length:
+                        # Hypothesis
+                        sent_hyp = sentence[:, 1]
+                        gt_hyp = ground_truth[:, 1]
+                        pred_hyp = all_preds[ii + FLAGS.batch_size]
+                        evalb_parses.append(print_tree(sent_hyp, gt_hyp, pred_hyp, inv_vocab, evalb=True))
+                        parses.append(print_tree(sent_hyp, gt_hyp, pred_hyp, inv_vocab, evalb=False))
+                else:
+                    if num_t <= FLAGS.seq_length:
+                        predicted = all_preds[ii]
+                        evalb_parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=True))
+                        parses.append(print_tree(sentence, ground_truth, predicted, inv_vocab, evalb=False))
 
         # Print Progress
         progress_bar.step(i+1, total=total_batches)
