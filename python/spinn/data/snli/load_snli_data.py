@@ -30,6 +30,11 @@ def load_data(path):
     examples = []
     with codecs.open(path, encoding='utf-8') as f:
         for line in f:
+            try:
+                line = line.encode('UTF-8')
+            except UnicodeError as e:
+                print "ENCODING ERROR:", line, e
+                line = "{}"
             loaded_example = json.loads(line)
             if loaded_example["gold_label"] not in LABEL_MAP:
                 continue
