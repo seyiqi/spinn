@@ -52,9 +52,9 @@ SWEEP_PARAMETERS = {
     "num_mlp_layers": ("mlp", LIN, 1, 3)
 }
 
-sweep_name = "sweep_" + \
+sweep_name = "sweep_01_23_r_" + \
     FIXED_PARAMETERS["data_type"] + "_" + FIXED_PARAMETERS["model_type"]
-sweep_runs = 4
+sweep_runs = 6
 queue = "jag"
 
 # - #
