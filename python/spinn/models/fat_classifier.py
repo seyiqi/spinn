@@ -373,6 +373,7 @@ def run(only_forward=False):
                     use_internal_parser=FLAGS.use_internal_parser,
                     use_reinforce=FLAGS.use_reinforce,
                     rl_style=FLAGS.rl_style,
+                    rl_baseline=FLAGS.rl_baseline,
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
@@ -561,6 +562,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_enum("rl_style", "zero-one", ["zero-one", "xent"], "Specify REINFORCE configuration.")
+    gflags.DEFINE_enum("rl_baseline", "ema", ["ema", "policy", "greedy"], "Specify REINFORCE baseline.")
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
