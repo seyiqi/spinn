@@ -133,10 +133,15 @@ class SentencePairModel(BaseModel):
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
-        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
-        self.accuracy = self.accFun(y, self.xp.array(y_batch))
+        if y_batch:
+            accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+            self.accuracy = self.accFun(y, self.xp.array(y_batch))
+            acc = self.accuracy.data
+        else:
+            accum_loss = 0.0
+            acc = 0.0
 
-        return y, accum_loss, self.accuracy.data, 0.0, None
+        return y, accum_loss, acc, 0.0, None
 
 
 class SentenceModel(BaseModel):

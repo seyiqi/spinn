@@ -40,7 +40,7 @@ from sklearn import metrics
 FLAGS = gflags.FLAGS
 
 
-def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
+def build_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
                               seq_length, num_classes, initial_embeddings, use_sentence_pair,
                               gpu, mlp_dim):
     model = model_cls(model_dim, word_embedding_dim, vocab_size,
@@ -61,6 +61,7 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              projection_dim=FLAGS.projection_dim,
              use_difference_feature=FLAGS.use_difference_feature,
              use_product_feature=FLAGS.use_product_feature,
+             rl_baseline=None if not FLAGS.use_reinforce else FLAGS.rl_baseline,
             )
 
     classifier_trainer = trainer_cls(model, gpu=gpu)
@@ -288,7 +289,7 @@ def run(only_forward=False):
 
         num_classes = len(data_manager.LABEL_MAP)
         use_sentence_pair = True
-        classifier_trainer = build_sentence_pair_model(model_cls, trainer_cls,
+        classifier_trainer = build_model(model_cls, trainer_cls,
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
@@ -303,7 +304,7 @@ def run(only_forward=False):
 
         num_classes = len(data_manager.LABEL_MAP)
         use_sentence_pair = False
-        classifier_trainer = build_sentence_pair_model(model_cls, trainer_cls,
+        classifier_trainer = build_model(model_cls, trainer_cls,
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,

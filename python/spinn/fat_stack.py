@@ -29,6 +29,8 @@ from spinn.util.chainer_blocks import treelstm, expand_along, dropout
 from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
+import spinn.cbow
+
 
 T_SHIFT  = 0
 T_REDUCE = 1
@@ -339,6 +341,7 @@ class BaseModel(Chain):
                  use_product_feature=False,
                  num_mlp_layers=2,
                  mlp_bn=False,
+                 rl_baseline=None,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
@@ -365,6 +368,37 @@ class BaseModel(Chain):
         self.reinforce_lr = 0.01
         self.mu = 0.1
         self.add_persistent('baseline', 0)
+
+        if rl_baseline == "policy":
+            baseline_model_module = spinn.cbow
+
+            if use_sentence_pair:
+                baseline_model_cls = baseline_model_module.SentencePairModel
+            else:
+                baseline_model_cls = baseline_model_module.SentenceModel
+
+            _model_dim = word_embedding_dim
+            _num_classes = 1 # Reward will be between 0 and 1
+
+            self.add_link("policy", baseline_model_cls(_model_dim, word_embedding_dim, vocab_size,
+             seq_length, initial_embeddings, _num_classes, mlp_dim=mlp_dim,
+             input_keep_rate=input_keep_rate,
+             classifier_keep_rate=classifier_keep_rate,
+             use_input_norm=use_input_norm,
+             tracker_keep_rate=tracker_keep_rate,
+             tracking_lstm_hidden_dim=tracking_lstm_hidden_dim,
+             transition_weight=transition_weight,
+             use_tracking_lstm=use_tracking_lstm,
+             use_sentence_pair=use_sentence_pair,
+             num_mlp_layers=num_mlp_layers,
+             mlp_bn=mlp_bn,
+             gpu=gpu,
+             use_skips=use_skips,
+             use_encode=use_encode,
+             projection_dim=projection_dim,
+             use_difference_feature=use_difference_feature,
+             use_product_feature=use_product_feature,
+            ))
 
         self.classifier = CrossEntropyClassifier(gpu)
         self.__gpu = gpu
@@ -504,8 +538,8 @@ class BaseModel(Chain):
         example = self.build_example(sentences, transitions, train)
         assert example.tokens.data.min() >= 0
         assert y_batch.min() >= 0
-        example = self.run_embed(example, train)
-        h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser,
+        example_embed = self.run_embed(example, train)
+        h, transition_acc, transition_loss = self.run_spinn(example_embed, train, use_internal_parser,
             validate_transitions, use_random, use_reinforce=use_reinforce, rl_style=rl_style, rl_baseline=rl_baseline)
         y = self.run_mlp(h, train)
 
@@ -519,6 +553,9 @@ class BaseModel(Chain):
             if rl_baseline == "ema": # Exponential Moving Average
                 self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
                 new_rewards = rewards - self.baseline
+            elif rl_baseline == "policy": # Policy Net
+                self.baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards)
+                new_rewards = rewards - self.baseline.data
             else:
                 raise NotImplementedError("Not implemented.")
 
@@ -528,7 +565,16 @@ class BaseModel(Chain):
         if hasattr(transition_acc, 'data'):
             transition_acc = transition_acc.data
 
+        if rl_baseline == "policy" and baseline_loss is not None:
+            accum_loss += baseline_loss
+
         return y, accum_loss, self.accuracy.data, transition_acc, transition_loss
+
+
+    def run_policy(self, sentences, transitions, y_batch, train, rewards):
+        y, _, _, _, _ = self.policy(sentences, transitions, y_batch=None, train=train)
+        pred_reward = F.flatten(F.sigmoid(y)) # Squash between 0 and 1
+        return pred_reward, F.mean_squared_error(pred_reward, rewards)
 
 
     def build_rewards(self, logits, y, style="zero-one"):
