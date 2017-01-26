@@ -533,19 +533,22 @@ class BaseModel(Chain):
 
 
     def __call__(self, sentences, transitions, y_batch=None, train=True,
-                 use_reinforce=False,rl_style="zero-one", rl_baseline="ema",
+                 use_reinforce=False, rl_style="zero-one", rl_baseline="ema",
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         example = self.build_example(sentences, transitions, train)
-        assert example.tokens.data.min() >= 0
-        assert y_batch.min() >= 0
         example_embed = self.run_embed(example, train)
         h, transition_acc, transition_loss = self.run_spinn(example_embed, train, use_internal_parser,
             validate_transitions, use_random, use_reinforce=use_reinforce, rl_style=rl_style, rl_baseline=rl_baseline)
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
-        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
-        self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+        if y_batch is not None:
+            accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+            self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+            acc = self.accuracy.data
+        else:
+            accum_loss = 0.0
+            acc = 0.0
 
         if train and use_reinforce:
             rewards = self.build_rewards(y, y_batch, rl_style)
@@ -554,8 +557,11 @@ class BaseModel(Chain):
                 self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
                 new_rewards = rewards - self.baseline
             elif rl_baseline == "policy": # Policy Net
-                self.baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards)
+                self.baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards, rl_style)
                 new_rewards = rewards - self.baseline.data
+            elif rl_baseline == "greedy": # Greedy Max
+                self.baseline = self.run_greedy_max(sentences, transitions, y_batch, train, rewards, rl_style)
+                new_rewards = rewards - self.baseline
             else:
                 raise NotImplementedError("Not implemented.")
 
@@ -568,13 +574,23 @@ class BaseModel(Chain):
         if rl_baseline == "policy" and baseline_loss is not None:
             accum_loss += baseline_loss
 
-        return y, accum_loss, self.accuracy.data, transition_acc, transition_loss
+        return y, accum_loss, acc, transition_acc, transition_loss
 
 
-    def run_policy(self, sentences, transitions, y_batch, train, rewards):
+    def run_policy(self, sentences, transitions, y_batch, train, rewards, rl_style):
+        if rl_style != "zero-one":
+            raise NotImplementedError("Policy net is only compatible with zero-one loss right now."
+                "It predicts a single value between 0 and 1.")
         y, _, _, _, _ = self.policy(sentences, transitions, y_batch=None, train=train)
         pred_reward = F.flatten(F.sigmoid(y)) # Squash between 0 and 1
         return pred_reward, F.mean_squared_error(pred_reward, rewards)
+
+
+    def run_greedy_max(self, sentences, transitions, y_batch, train, rewards, rl_style):
+        # TODO: Should this be run with train=False? Will effect batchnorm and dropout.
+        y, _, _, _, _ = self.__call__(sentences, transitions, y_batch=None, train=train, use_internal_parser=True)
+        pred_reward = self.build_rewards(y, y_batch, rl_style)
+        return pred_reward
 
 
     def build_rewards(self, logits, y, style="zero-one"):
