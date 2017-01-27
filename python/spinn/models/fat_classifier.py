@@ -358,6 +358,9 @@ def run(only_forward=False):
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
+        accum_reward = deque(maxlen=FLAGS.deq_length)
+        accum_new_rew = deque(maxlen=FLAGS.deq_length)
+        accum_baseline = deque(maxlen=FLAGS.deq_length)
         printed_total_weights = False
         for step in range(step, FLAGS.training_steps):
             X_batch, transitions_batch, y_batch, _ = training_data_iter.next()
@@ -382,6 +385,11 @@ def run(only_forward=False):
 
             accum_class_preds.append(y.data.argmax(axis=1))
             accum_class_truth.append(y_batch)
+
+            if FLAGS.use_reinforce:
+                accum_reward.append(model.avg_reward)
+                accum_new_rew.append(model.avg_new_rew)
+                accum_baseline.append(model.baseline)
 
             if not printed_total_weights:
                 printed_total_weights = True
@@ -452,9 +460,18 @@ def run(only_forward=False):
                     avg_trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
                 else:
                     avg_trans_acc = 0.0
-                logger.Log(
-                    "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
-                    % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
+                if FLAGS.use_reinforce:
+                    avg_reward = np.array(accum_reward).mean()
+                    avg_new_rew = np.array(accum_new_rew).mean()
+                    avg_baseline = np.array(accum_baseline).mean()
+                    logger.Log(
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f Baseline: %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data,
+                            avg_reward, avg_new_rew, avg_baseline))
+                else:
+                    logger.Log(
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
                 if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
                         np.array(all_preds),
@@ -476,6 +493,9 @@ def run(only_forward=False):
                 accum_class_acc.clear()
                 accum_preds.clear()
                 accum_truth.clear()
+                accum_reward.clear()
+                accum_new_rew.clear()
+                accum_baseline.clear()
 
             if step > 0 and (step % FLAGS.ckpt_interval_steps == 0 or step % FLAGS.eval_interval_steps == 0):
                 if step % FLAGS.ckpt_interval_steps == 0:

@@ -565,6 +565,9 @@ class BaseModel(Chain):
             else:
                 raise NotImplementedError("Not implemented.")
 
+            self.avg_reward = rewards.mean()
+            self.avg_new_rew = new_rewards.mean()
+
             transition_loss = self.reinforce(new_rewards)
             transition_loss *= self.transition_weight
 
