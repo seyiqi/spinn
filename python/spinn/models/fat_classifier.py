@@ -68,14 +68,6 @@ def build_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_di
 
     return classifier_trainer
 
-def hamming_distance(s1, s2):
-    """ source: https://en.wikipedia.org/wiki/Hamming_distance
-        Return the Hamming distance between equal-length sequences
-    """
-    if len(s1) != len(s2):
-        raise ValueError("Undefined for sequences of unequal length")
-    return sum(el1 != el2 for el1, el2 in zip(s1, s2))
-
 
 def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
              use_internal_parser=False, vocabulary=None):
@@ -389,7 +381,7 @@ def run(only_forward=False):
             if FLAGS.use_reinforce:
                 accum_reward.append(model.avg_reward)
                 accum_new_rew.append(model.avg_new_rew)
-                accum_baseline.append(model.baseline)
+                accum_baseline.append(model.avg_baseline)
 
             if not printed_total_weights:
                 printed_total_weights = True
@@ -465,7 +457,7 @@ def run(only_forward=False):
                     avg_new_rew = np.array(accum_new_rew).mean()
                     avg_baseline = np.array(accum_baseline).mean()
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f Baseline: %5f"
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f %5f"
                         % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data,
                             avg_reward, avg_new_rew, avg_baseline))
                 else:

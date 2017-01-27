@@ -555,13 +555,16 @@ class BaseModel(Chain):
 
             if rl_baseline == "ema": # Exponential Moving Average
                 self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
+                self.avg_baseline = self.baseline
                 new_rewards = rewards - self.baseline
             elif rl_baseline == "policy": # Policy Net
-                self.baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards, rl_style)
-                new_rewards = rewards - self.baseline.data
+                baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards, rl_style)
+                self.avg_baseline = baseline.data.mean()
+                new_rewards = rewards - baseline.data
             elif rl_baseline == "greedy": # Greedy Max
-                self.baseline = self.run_greedy_max(sentences, transitions, y_batch, train, rewards, rl_style)
-                new_rewards = rewards - self.baseline
+                baseline = self.run_greedy_max(sentences, transitions, y_batch, train, rewards, rl_style)
+                self.avg_baseline = baseline.mean()
+                new_rewards = rewards - baseline
             else:
                 raise NotImplementedError("Not implemented.")
 
