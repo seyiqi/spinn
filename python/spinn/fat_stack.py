@@ -342,6 +342,7 @@ class BaseModel(Chain):
                  num_mlp_layers=2,
                  mlp_bn=False,
                  rl_baseline=None,
+                 rl_policy_dim=None,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
@@ -380,8 +381,14 @@ class BaseModel(Chain):
             _model_dim = word_embedding_dim
             _num_classes = 1 # Reward will be between 0 and 1
 
+            # TODO:
+            # The policy net is naively initialized. Certain features
+            # such as keep_rate, batch_norm, num_mlp_layers,
+            # etc. are simply taken from the hyperparams. We might
+            # want these to be different.
             self.add_link("policy", baseline_model_cls(_model_dim, word_embedding_dim, vocab_size,
-             seq_length, initial_embeddings, _num_classes, mlp_dim=mlp_dim,
+             seq_length, initial_embeddings, _num_classes,
+             mlp_dim=rl_policy_dim,
              input_keep_rate=input_keep_rate,
              classifier_keep_rate=classifier_keep_rate,
              use_input_norm=use_input_norm,
@@ -394,7 +401,7 @@ class BaseModel(Chain):
              mlp_bn=mlp_bn,
              gpu=gpu,
              use_skips=use_skips,
-             use_encode=use_encode,
+             use_encode=False,
              projection_dim=projection_dim,
              use_difference_feature=use_difference_feature,
              use_product_feature=use_product_feature,
