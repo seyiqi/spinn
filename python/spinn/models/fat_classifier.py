@@ -40,7 +40,7 @@ from sklearn import metrics
 FLAGS = gflags.FLAGS
 
 
-def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
+def build_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
                               seq_length, num_classes, initial_embeddings, use_sentence_pair,
                               gpu, mlp_dim):
     model = model_cls(model_dim, word_embedding_dim, vocab_size,
@@ -61,19 +61,12 @@ def build_sentence_pair_model(model_cls, trainer_cls, vocab_size, model_dim, wor
              projection_dim=FLAGS.projection_dim,
              use_difference_feature=FLAGS.use_difference_feature,
              use_product_feature=FLAGS.use_product_feature,
+             rl_baseline=None if not FLAGS.use_reinforce else FLAGS.rl_baseline,
             )
 
     classifier_trainer = trainer_cls(model, gpu=gpu)
 
     return classifier_trainer
-
-def hamming_distance(s1, s2):
-    """ source: https://en.wikipedia.org/wiki/Hamming_distance
-        Return the Hamming distance between equal-length sequences
-    """
-    if len(s1) != len(s2):
-        raise ValueError("Undefined for sequences of unequal length")
-    return sum(el1 != el2 for el1, el2 in zip(s1, s2))
 
 
 def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
@@ -288,7 +281,7 @@ def run(only_forward=False):
 
         num_classes = len(data_manager.LABEL_MAP)
         use_sentence_pair = True
-        classifier_trainer = build_sentence_pair_model(model_cls, trainer_cls,
+        classifier_trainer = build_model(model_cls, trainer_cls,
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
@@ -303,7 +296,7 @@ def run(only_forward=False):
 
         num_classes = len(data_manager.LABEL_MAP)
         use_sentence_pair = False
-        classifier_trainer = build_sentence_pair_model(model_cls, trainer_cls,
+        classifier_trainer = build_model(model_cls, trainer_cls,
                               len(vocabulary), FLAGS.model_dim, FLAGS.word_embedding_dim,
                               FLAGS.seq_length, num_classes, initial_embeddings,
                               use_sentence_pair,
@@ -357,6 +350,9 @@ def run(only_forward=False):
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
+        accum_reward = deque(maxlen=FLAGS.deq_length)
+        accum_new_rew = deque(maxlen=FLAGS.deq_length)
+        accum_baseline = deque(maxlen=FLAGS.deq_length)
         printed_total_weights = False
         for step in range(step, FLAGS.training_steps):
             X_batch, transitions_batch, y_batch, _ = training_data_iter.next()
@@ -373,6 +369,7 @@ def run(only_forward=False):
                     use_internal_parser=FLAGS.use_internal_parser,
                     use_reinforce=FLAGS.use_reinforce,
                     rl_style=FLAGS.rl_style,
+                    rl_baseline=FLAGS.rl_baseline,
                     use_random=FLAGS.use_random)
             y, xent_loss, class_acc, transition_acc, transition_loss = ret
 
@@ -380,6 +377,11 @@ def run(only_forward=False):
 
             accum_class_preds.append(y.data.argmax(axis=1))
             accum_class_truth.append(y_batch)
+
+            if FLAGS.use_reinforce:
+                accum_reward.append(model.avg_reward)
+                accum_new_rew.append(model.avg_new_rew)
+                accum_baseline.append(model.avg_baseline)
 
             if not printed_total_weights:
                 printed_total_weights = True
@@ -450,9 +452,18 @@ def run(only_forward=False):
                     avg_trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
                 else:
                     avg_trans_acc = 0.0
-                logger.Log(
-                    "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
-                    % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
+                if FLAGS.use_reinforce:
+                    avg_reward = np.array(accum_reward).mean()
+                    avg_new_rew = np.array(accum_new_rew).mean()
+                    avg_baseline = np.array(accum_baseline).mean()
+                    logger.Log(
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data,
+                            avg_reward, avg_new_rew, avg_baseline))
+                else:
+                    logger.Log(
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
                 if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
                         np.array(all_preds),
@@ -474,6 +485,9 @@ def run(only_forward=False):
                 accum_class_acc.clear()
                 accum_preds.clear()
                 accum_truth.clear()
+                accum_reward.clear()
+                accum_new_rew.clear()
+                accum_baseline.clear()
 
             if step > 0 and (step % FLAGS.ckpt_interval_steps == 0 or step % FLAGS.eval_interval_steps == 0):
                 if step % FLAGS.ckpt_interval_steps == 0:
@@ -561,6 +575,7 @@ if __name__ == '__main__':
     gflags.DEFINE_integer("tracking_lstm_hidden_dim", 4, "")
     gflags.DEFINE_boolean("use_reinforce", False, "Use RL to provide tracking lstm gradients")
     gflags.DEFINE_enum("rl_style", "zero-one", ["zero-one", "xent"], "Specify REINFORCE configuration.")
+    gflags.DEFINE_enum("rl_baseline", "ema", ["ema", "policy", "greedy"], "Specify REINFORCE baseline.")
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")

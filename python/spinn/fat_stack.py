@@ -29,6 +29,8 @@ from spinn.util.chainer_blocks import treelstm, expand_along, dropout
 from spinn.util.chainer_blocks import var_mean
 from sklearn import metrics
 
+import spinn.cbow
+
 
 T_SHIFT  = 0
 T_REDUCE = 1
@@ -137,13 +139,10 @@ class SPINN(Chain):
         choices = [T_SHIFT, T_REDUCE, T_SKIP] if use_skips else [T_SHIFT, T_REDUCE]
         self.choices = np.array(choices, dtype=np.int32)
 
-        # RL Params
-        self.reinforce_lr = 0.01
-        self.mu = 0.1
-        self.add_persistent('baseline', 0)
 
     def __call__(self, example, train, print_transitions=False, use_internal_parser=False,
-                 validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
+                 validate_transitions=True, use_random=False,
+                 use_reinforce=False, rl_style="zero-one", rl_baseline="ema"):
         self.bufs = example.tokens
         self.stacks = [[] for buf in self.bufs]
         self.buffers_t = [0 for buf in self.bufs]
@@ -162,10 +161,11 @@ class SPINN(Chain):
                         use_random=use_random,
                         use_reinforce=use_reinforce,
                         rl_style=rl_style,
+                        rl_baseline=rl_baseline,
                         )
 
     def run(self, train, print_transitions=False, run_internal_parser=False, use_internal_parser=False,
-            validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
+            validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one", rl_baseline="ema"):
         transition_loss, transition_acc = 0, 0
         if hasattr(self, 'transitions'):
             num_transitions = self.transitions.shape[1]
@@ -282,12 +282,10 @@ class SPINN(Chain):
                 normalize=False)
 
             transition_loss *= self.transition_weight
-            reporter.report({'transition_accuracy': transition_acc,
-                             'transition_loss': transition_loss}, self)
         else:
             transition_loss = None
 
-        return [stack[-1] for stack in self.stacks], transition_loss
+        return [stack[-1] for stack in self.stacks], transition_loss, transition_acc
 
 
     def validate(self, transitions, preds, stacks, buffers_t, buffers_n):
@@ -324,60 +322,6 @@ class SPINN(Chain):
         return hyp_acc, truth_acc, hyp_xent, truth_xent
 
 
-    def reinforce(self, rewards):
-        """ The tricky step here is when we "expand rewards".
-
-            Say we have batch size 2, with these actions, log_probs, and rewards:
-
-            actions = [[0, 1], [1, 1]]
-            log_probs = [
-                [[0.2, 0.8], [0.3, 0.7]],
-                [[0.4, 0.6], [0.5, 0.5]]
-                ]
-            rewards = [0., 1.]
-
-            Then we want to calculate the objective as so:
-
-            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
-
-            Now this gets slightly tricker when using skips (action==2):
-
-            actions = [[0, 1], [2, 1]]
-            log_probs = [
-                [[0.2, 0.8], [0.3, 0.7]],
-                [[0.4, 0.6], [0.5, 0.5]]
-                ]
-            rewards = [0., 1.]
-            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
-
-            NOTE: The above example is fictional, and although those values are
-            not achievable, is still representative of what is going on.
-
-        """
-        hyp_acc, truth_acc, hyp_xent, truth_xent = self.get_statistics()
-
-        self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
-        new_rewards = rewards - self.baseline
-        log_p = F.log_softmax(hyp_xent)
-        log_p_preds = F.select_item(log_p, truth_xent)
-
-        if self.transition_mask.shape[0] == new_rewards.shape[0] * 2:
-            # Handles the case of SNLI where each reward is used for two sentences.
-            new_rewards = np.concatenate([new_rewards, new_rewards], axis=0)
-        else:
-            assert self.transition_mask.shape[0] == new_rewards.shape[0]
-
-        # Expand rewards
-        if self.use_skips:
-            new_rewards = expand_along(new_rewards, np.full(self.transition_mask.shape, True))
-        else:
-            new_rewards = expand_along(new_rewards, self.transition_mask)
-
-        transition_loss = F.sum(-1. * log_p_preds * new_rewards) / log_p_preds.shape[0]
-
-        return transition_loss
-
-
 class BaseModel(Chain):
     def __init__(self, model_dim, word_embedding_dim, vocab_size,
                  seq_length, initial_embeddings, num_classes, mlp_dim,
@@ -397,6 +341,7 @@ class BaseModel(Chain):
                  use_product_feature=False,
                  num_mlp_layers=2,
                  mlp_bn=False,
+                 rl_baseline=None,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
@@ -418,6 +363,42 @@ class BaseModel(Chain):
         self.mlp_dim = mlp_dim
         self.num_mlp_layers = num_mlp_layers
         self.mlp_bn = mlp_bn
+
+        # RL Params
+        self.reinforce_lr = 0.01
+        self.mu = 0.1
+        self.add_persistent('baseline', 0)
+
+        if rl_baseline == "policy":
+            baseline_model_module = spinn.cbow
+
+            if use_sentence_pair:
+                baseline_model_cls = baseline_model_module.SentencePairModel
+            else:
+                baseline_model_cls = baseline_model_module.SentenceModel
+
+            _model_dim = word_embedding_dim
+            _num_classes = 1 # Reward will be between 0 and 1
+
+            self.add_link("policy", baseline_model_cls(_model_dim, word_embedding_dim, vocab_size,
+             seq_length, initial_embeddings, _num_classes, mlp_dim=mlp_dim,
+             input_keep_rate=input_keep_rate,
+             classifier_keep_rate=classifier_keep_rate,
+             use_input_norm=use_input_norm,
+             tracker_keep_rate=tracker_keep_rate,
+             tracking_lstm_hidden_dim=tracking_lstm_hidden_dim,
+             transition_weight=transition_weight,
+             use_tracking_lstm=use_tracking_lstm,
+             use_sentence_pair=use_sentence_pair,
+             num_mlp_layers=num_mlp_layers,
+             mlp_bn=mlp_bn,
+             gpu=gpu,
+             use_skips=use_skips,
+             use_encode=use_encode,
+             projection_dim=projection_dim,
+             use_difference_feature=use_difference_feature,
+             use_product_feature=use_product_feature,
+            ))
 
         self.classifier = CrossEntropyClassifier(gpu)
         self.__gpu = gpu
@@ -507,21 +488,16 @@ class BaseModel(Chain):
 
 
     def run_spinn(self, example, train, use_internal_parser,
-                  validate_transitions=True, use_random=False, use_reinforce=False, rl_style="zero-one"):
-        r = reporter.Reporter()
-        r.add_observer('spinn', self.spinn)
-        observation = {}
-        with r.scope(observation):
-            h_both, _ = self.spinn(example, train,
-                                   use_internal_parser=use_internal_parser,
-                                   validate_transitions=validate_transitions,
-                                   use_random=use_random,
-                                   use_reinforce=use_reinforce,
-                                   rl_style=rl_style,
-                                   )
-
-        transition_acc = observation.get('spinn/transition_accuracy', 0.0)
-        transition_loss = observation.get('spinn/transition_loss', None)
+                  validate_transitions=True, use_random=False,
+                  use_reinforce=False, rl_style="zero-one", rl_baseline="ema"):
+        h_both, transition_loss, transition_acc = self.spinn(example, train,
+                               use_internal_parser=use_internal_parser,
+                               validate_transitions=validate_transitions,
+                               use_random=use_random,
+                               use_reinforce=use_reinforce,
+                               rl_style=rl_style,
+                               rl_baseline=rl_baseline,
+                               )
         return h_both, transition_acc, transition_loss
 
 
@@ -556,29 +532,71 @@ class BaseModel(Chain):
         return y
 
 
-    def __call__(self, sentences, transitions, y_batch=None, train=True, use_reinforce=False, rl_style="zero-one",
+    def __call__(self, sentences, transitions, y_batch=None, train=True,
+                 use_reinforce=False, rl_style="zero-one", rl_baseline="ema",
                  use_internal_parser=False, validate_transitions=True, use_random=False):
         example = self.build_example(sentences, transitions, train)
-        assert example.tokens.data.min() >= 0
-        assert y_batch.min() >= 0
-        example = self.run_embed(example, train)
-        h, transition_acc, transition_loss = self.run_spinn(example, train, use_internal_parser,
-            validate_transitions, use_random, use_reinforce=use_reinforce, rl_style=rl_style)
+        example_embed = self.run_embed(example, train)
+        h, transition_acc, transition_loss = self.run_spinn(example_embed, train, use_internal_parser,
+            validate_transitions, use_random, use_reinforce=use_reinforce, rl_style=rl_style, rl_baseline=rl_baseline)
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
-        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
-        self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+        if y_batch is not None:
+            accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+            self.accuracy = self.accFun(y, self.__mod.array(y_batch))
+            acc = self.accuracy.data
+        else:
+            accum_loss = 0.0
+            acc = 0.0
 
         if train and use_reinforce:
             rewards = self.build_rewards(y, y_batch, rl_style)
-            transition_loss = self.spinn.reinforce(rewards)
+
+            if rl_baseline == "ema": # Exponential Moving Average
+                self.baseline = self.baseline * (1 - self.mu) + self.mu * np.mean(rewards)
+                self.avg_baseline = self.baseline
+                new_rewards = rewards - self.baseline
+            elif rl_baseline == "policy": # Policy Net
+                baseline, baseline_loss = self.run_policy(sentences, transitions, y_batch, train, rewards, rl_style)
+                self.avg_baseline = baseline.data.mean()
+                new_rewards = rewards - baseline.data
+            elif rl_baseline == "greedy": # Greedy Max
+                baseline = self.run_greedy_max(sentences, transitions, y_batch, train, rewards, rl_style)
+                self.avg_baseline = baseline.mean()
+                new_rewards = rewards - baseline
+            else:
+                raise NotImplementedError("Not implemented.")
+
+            self.avg_reward = rewards.mean()
+            self.avg_new_rew = new_rewards.mean()
+
+            transition_loss = self.reinforce(new_rewards)
             transition_loss *= self.transition_weight
 
         if hasattr(transition_acc, 'data'):
             transition_acc = transition_acc.data
 
-        return y, accum_loss, self.accuracy.data, transition_acc, transition_loss
+        if rl_baseline == "policy" and baseline_loss is not None:
+            accum_loss += baseline_loss
+
+        return y, accum_loss, acc, transition_acc, transition_loss
+
+
+    def run_policy(self, sentences, transitions, y_batch, train, rewards, rl_style):
+        if rl_style != "zero-one":
+            raise NotImplementedError("Policy net is only compatible with zero-one loss right now."
+                "It predicts a single value between 0 and 1.")
+        y, _, _, _, _ = self.policy(sentences, transitions, y_batch=None, train=train)
+        pred_reward = F.flatten(F.sigmoid(y)) # Squash between 0 and 1
+        return pred_reward, F.mean_squared_error(pred_reward, rewards)
+
+
+    def run_greedy_max(self, sentences, transitions, y_batch, train, rewards, rl_style):
+        # TODO: Should this be run with train=False? Will effect batchnorm and dropout.
+        y, _, _, _, _ = self.__call__(sentences, transitions, y_batch=None, train=train, use_internal_parser=True)
+        pred_reward = self.build_rewards(y, y_batch, rl_style)
+        return pred_reward
 
 
     def build_rewards(self, logits, y, style="zero-one"):
@@ -591,6 +609,57 @@ class BaseModel(Chain):
         else:
             raise Exception("Not implemented")
         return rewards
+
+
+    def reinforce(self, rewards):
+        """ The tricky step here is when we "expand rewards".
+
+            Say we have batch size 2, with these actions, log_probs, and rewards:
+
+            actions = [[0, 1], [1, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+
+            Then we want to calculate the objective as so:
+
+            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
+
+            Now this gets slightly tricker when using skips (action==2):
+
+            actions = [[0, 1], [2, 1]]
+            log_probs = [
+                [[0.2, 0.8], [0.3, 0.7]],
+                [[0.4, 0.6], [0.5, 0.5]]
+                ]
+            rewards = [0., 1.]
+            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
+
+            NOTE: The above example is fictional, and although those values are
+            not achievable, is still representative of what is going on.
+
+        """
+        hyp_acc, truth_acc, hyp_xent, truth_xent = self.spinn.get_statistics()
+        log_p = F.log_softmax(hyp_xent)
+        log_p_preds = F.select_item(log_p, truth_xent)
+
+        if self.use_sentence_pair:
+            # Handles the case of SNLI where each reward is used for two sentences.
+            rewards = np.concatenate([rewards, rewards], axis=0)
+        else:
+            assert self.spinn.transition_mask.shape[0] == rewards.shape[0]
+
+        # Expand rewards
+        if self.spinn.use_skips:
+            rewards = expand_along(rewards, np.full(self.spinn.transition_mask.shape, True))
+        else:
+            rewards = expand_along(rewards, self.spinn.transition_mask)
+
+        transition_loss = F.sum(-1. * log_p_preds * rewards) / log_p_preds.shape[0]
+
+        return transition_loss
 
 
 class SentencePairModel(BaseModel):
@@ -620,10 +689,10 @@ class SentencePairModel(BaseModel):
 
 
     def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True,
-                  use_random=False, use_reinforce=False, rl_style="zero-one"):
+                  use_random=False, use_reinforce=False, rl_style="zero-one", rl_baseline="ema"):
         h_both, transition_acc, transition_loss = super(SentencePairModel, self).run_spinn(
             example, train, use_internal_parser, validate_transitions,
-            use_random, use_reinforce=use_reinforce, rl_style=rl_style)
+            use_random, use_reinforce=use_reinforce, rl_style=rl_style, rl_baseline=rl_baseline)
         batch_size = len(h_both) / 2
         h_premise = F.concat(h_both[:batch_size], axis=0)
         h_hypothesis = F.concat(h_both[batch_size:], axis=0)
@@ -651,9 +720,9 @@ class SentenceModel(BaseModel):
 
 
     def run_spinn(self, example, train, use_internal_parser=False, validate_transitions=True,
-                  use_random=False, use_reinforce=False, rl_style="zero-one"):
+                  use_random=False, use_reinforce=False, rl_style="zero-one", rl_baseline="ema"):
         h, transition_acc, transition_loss = super(SentenceModel, self).run_spinn(
             example, train, use_internal_parser, validate_transitions,
-            use_random, use_reinforce=use_reinforce, rl_style=rl_style)
+            use_random, use_reinforce=use_reinforce, rl_style=rl_style, rl_baseline=rl_baseline)
         h = F.concat(h, axis=0)
         return h, transition_acc, transition_loss
