@@ -598,7 +598,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
-    gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the RHS.")
+    gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the LHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
         "that give a valid parse tree.")
     gflags.DEFINE_boolean("use_tracking_lstm", True,

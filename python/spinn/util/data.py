@@ -1,4 +1,51 @@
-"""Dataset handling and related yuck."""
+"""
+
+Dataset handling and related yuck.
+
+A. use_left_padding and use_skips explained.
+
+i. use_skips.
+
+There are 3 transitions: SHIFT, REDUCE, and SKIP. SKIP means
+don't modify the stack or the buffer right now. When the use_skips FLAG
+is on, this tells the parser to predict among the 3 possible options:
+SHIFT, REDUCE, and SKIP. When use_skips is off, then only predict
+between SHIFT and REDUCE. It tends to make more sense to have use_skips
+off, but this makes the length of each sequence in a batch different, so
+it's at least worth considering turning it on. Note: when the flag
+validate_transitions is on, it's impossible to use an invalid
+action even if it was predicted, including a SKIP.
+
+ii. use_left_padding.
+
+The flag use_left_padding refers to how the transitions are padded.
+The tokens are always padded on the right, but the transitions could
+be padded on the left or the right based on this flag. If the flag
+use_left_padding is on, then transitions will begin with a sequence
+of SKIPs, meaning that all examples will have their last REDUCE
+simultaneously. When use_left_padding is off, then all transitions
+will end with a sequence of SKIPs, meaning that all examples will
+have their first SHIFT simultaneously. In either setting, none of the
+padded tokens are ever used because we have SKIP transitions.
+
+It's not clear which of the use_left_padding settings are better, but
+having use_left_padding off is most similar to the case where there
+are no SKIP transitions, but the tokens are padded on the left, such
+as in the case in some previous implementations of SPINN. This similarity
+is mostly from the fact that in both cases the last action on all
+examples would be a REDUCE.
+
+iii. greedy-shift.
+
+Not implemented here, but another possible option for consuming transitions
+would be "greedy-shift". In greedy-shift, we would SHIFT among all examples
+until hitting a REDUCE. Only once all examples have hit a REDUCE, do we
+perform a REDUCE. This maximizes the average number of examples being REDUCEd
+at any given time, and minimizes the total number of REDUCEs. This was tried
+and sped up performance marginally, but seemed overly complex
+so did not keep the changes in the codebase.
+
+"""
 
 import random
 import itertools
