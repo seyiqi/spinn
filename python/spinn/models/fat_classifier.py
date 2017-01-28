@@ -447,6 +447,8 @@ def run(only_forward=False):
                     pass
 
             end = time.time()
+            avg_time = (end - start) / float(y_batch.shape[0])
+            avg_train_time.append(avg_time)
 
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
@@ -460,8 +462,6 @@ def run(only_forward=False):
 
             if step % FLAGS.statistics_interval_steps == 0:
                 progress_bar.finish()
-                avg_time = (end - start) / float(y_batch.shape[0])
-                avg_train_time.append(avg_time)
                 avg_time_last_5 = np.array(avg_train_time).astype(np.float32).mean()
                 avg_class_acc = np.array(accum_class_acc).mean()
                 all_preds = flatten(accum_preds)
