@@ -210,10 +210,7 @@ def bundle(lstm_iter):
     lstm_iter = tuple(lstm_iter)
     if lstm_iter[0] is None:
         return None
-    try:
-        return LSTMState(F.concat(lstm_iter, axis=0))
-    except:
-        import ipdb; ipdb.set_trace()
+    return LSTMState(F.concat(lstm_iter, axis=0))
 
 
 def unbundle(state):

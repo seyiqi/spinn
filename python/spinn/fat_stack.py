@@ -278,7 +278,7 @@ class SPINN(Chain):
                 hyp_acc, truth_acc.astype(np.int32))
 
             transition_loss = F.softmax_cross_entropy(
-                hyp_xent, truth_xent.astype(np.int32),
+                hyp_xent, truth_acc.astype(np.int32),
                 normalize=False)
 
             transition_loss *= self.transition_weight
@@ -578,16 +578,18 @@ class BaseModel(Chain):
             self.avg_reward = rewards.mean()
             self.avg_new_rew = new_rewards.mean()
 
-            transition_loss = self.reinforce(new_rewards)
-            transition_loss *= self.transition_weight
+            rl_loss = self.reinforce(new_rewards)
+            rl_loss *= self.transition_weight
+        else:
+            rl_loss = None
 
         if hasattr(transition_acc, 'data'):
             transition_acc = transition_acc.data
 
         if rl_baseline == "policy" and baseline_loss is not None:
-            accum_loss += baseline_loss
+            rl_loss += baseline_loss
 
-        return y, accum_loss, acc, transition_acc, transition_loss
+        return y, accum_loss, acc, transition_acc, transition_loss, rl_loss
 
 
     def run_policy(self, sentences, transitions, y_batch, train, rewards, rl_style):
@@ -632,7 +634,7 @@ class BaseModel(Chain):
 
             Then we want to calculate the objective as so:
 
-            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
+            rl_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
 
             Now this gets slightly tricker when using skips (action==2):
 
@@ -642,7 +644,7 @@ class BaseModel(Chain):
                 [[0.4, 0.6], [0.5, 0.5]]
                 ]
             rewards = [0., 1.]
-            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
+            rl_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
 
             NOTE: The above example is fictional, and although those values are
             not achievable, is still representative of what is going on.
@@ -664,9 +666,9 @@ class BaseModel(Chain):
         else:
             rewards = expand_along(rewards, self.spinn.transition_mask)
 
-        transition_loss = F.sum(-1. * log_p_preds * rewards) / log_p_preds.shape[0]
+        rl_loss = F.sum(-1. * log_p_preds * rewards) / log_p_preds.shape[0]
 
-        return transition_loss
+        return rl_loss
 
 
 class SentencePairModel(BaseModel):

@@ -101,7 +101,7 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 use_reinforce=False,
                 validate_transitions=FLAGS.validate_transitions,
                 use_random=FLAGS.use_random)
-            y, loss, class_acc, transition_acc, transition_loss = ret
+            y, loss, class_acc, transition_acc, transition_loss, rl_loss = ret
             end = time.time()
             acc_value = class_acc
             accum_time.append((end - start) / float(eval_y_batch.shape[0]))
@@ -385,7 +385,7 @@ def run(only_forward=False):
                     rl_style=FLAGS.rl_style,
                     rl_baseline=FLAGS.rl_baseline,
                     use_random=FLAGS.use_random)
-            y, xent_loss, class_acc, transition_acc, transition_loss = ret
+            y, xent_loss, class_acc, transition_acc, transition_loss, rl_loss = ret
 
             xent_loss *= FLAGS.y_lambda
 
@@ -410,25 +410,33 @@ def run(only_forward=False):
                 accum_preds.append(preds)
                 accum_truth.append(truth)
 
+            # Extract L2 Cost
+            l2_loss = l2_cost(model, FLAGS.l2_lambda) if FLAGS.use_l2 else None
+
             # Boilerplate for calculating loss.
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
+            l2_cost_val = l2_loss.data if l2_loss is not None else 0.0
+            rl_cost_val = rl_loss.data if rl_loss is not None else 0.0
             accum_class_acc.append(class_acc)
-
-            # Extract L2 Cost
-            l2_loss = l2_cost(model, FLAGS.l2_lambda)
 
             # Accumulate Total Loss Data
             total_cost_val = 0.0
             total_cost_val += xent_loss.data
-            total_cost_val += l2_loss.data
-            total_cost_val += transition_cost_val
+            total_cost_val += l2_cost_val
+            if not FLAGS.use_reinforce:
+                total_cost_val += transition_cost_val
+            if FLAGS.use_reinforce:
+                total_cost_val += rl_cost_val
 
             # Accumulate Total Loss Variable
             total_loss = 0.0
             total_loss += xent_loss
-            total_loss += l2_loss
-            if hasattr(transition_loss, 'backward'):
+            if FLAGS.use_l2 and hasattr(l2_loss, 'backward'):
+                total_loss += l2_loss
+            if not FLAGS.use_reinforce and hasattr(transition_loss, 'backward'):
                 total_loss += transition_loss
+            if FLAGS.use_reinforce and hasattr(rl_loss, 'backward'):
+                total_loss += rl_loss
 
             # Get gradients
             total_loss.backward()
@@ -475,13 +483,15 @@ def run(only_forward=False):
                     avg_new_rew = np.array(accum_new_rew).mean()
                     avg_baseline = np.array(accum_baseline).mean()
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f %5f Time: %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data,
-                            avg_reward, avg_new_rew, avg_baseline, avg_time_last_5))
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f %5f Rewards: %5f %5f Time: %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_cost_val, rl_cost_val,
+                            avg_reward, avg_new_rew,
+                            avg_time_last_5))
                 else:
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Time: %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data, avg_time_last_5))
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f %5f Time: %5f"
+                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_cost_val, rl_cost_val,
+                            avg_time_last_5))
                 if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
                         np.array(all_preds),
@@ -598,6 +608,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
+    gflags.DEFINE_boolean("use_l2", False, "Apply l2 parameter regularization.")
     gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the LHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
         "that give a valid parse tree.")
