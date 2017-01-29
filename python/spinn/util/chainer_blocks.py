@@ -43,6 +43,39 @@ class HardGradientClipping(object):
             param.grad = F.clip(param.grad, self.x_min, self.x_max).data
 
 
+class L2WeightDecay(object):
+    """Optimizer hook function for weight decay regularization.
+
+    This hook function adds a scaled parameter to the corresponding gradient.
+    It can be used as a regularization.
+
+    Args:
+        rate (float): Coefficient for the weight decay.
+
+    Attributes:
+        rate (float): Coefficient for the weight decay.
+
+    """
+    name = 'L2WeightDecay'
+
+    def __init__(self, rate):
+        self.rate = rate
+
+    def kernel(self):
+        return cuda.elementwise(
+            'T p, T decay', 'T g', 'g += 2 * decay * p', 'l2_weight_decay')
+
+    def __call__(self, opt):
+        rate = self.rate
+        for param in opt.target.params():
+            p, g = param.data, param.grad
+            with cuda.get_device(p) as dev:
+                if int(dev) == -1:
+                    g += 2 * rate * p
+                else:
+                    self.kernel()(p, rate, g)
+
+
 def dropout(inp, ratio, train):
     if ratio > 0:
         return F.dropout(inp, ratio, train)
@@ -90,13 +123,6 @@ def gradient_check(model, get_loss, rtol=0, atol=1e-2, to_check=10):
     estimates, grads = zip(*checked)
     estimates, grads = np.array(estimates), np.array(grads)
     testing.assert_allclose(estimates, grads, rtol=rtol, atol=atol, verbose=True), "Gradient check failed."
-
-
-def l2_cost(model, l2_lambda):
-    cost = 0.0
-    for _, w in model.namedparams():
-        cost += l2_lambda * F.sum(F.square(w))
-    return cost
 
 
 def flatten(l):

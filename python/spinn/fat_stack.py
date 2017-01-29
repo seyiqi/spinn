@@ -21,7 +21,7 @@ from chainer.functions.activation import slstm
 from chainer.utils import type_check
 from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
 
-from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping
+from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping, L2WeightDecay
 from spinn.util.chainer_blocks import LSTMState, Embed, Reduce, LSTMChain
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu
@@ -55,7 +55,7 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             else:
                 data[:] = np.random.uniform(-0.1, 0.1, data.shape)
 
-    def init_optimizer(self, lr=0.001, clip=5.0, **kwargs):
+    def init_optimizer(self, lr=0.001, clip=5.0, l2_lambda=2e-5, **kwargs):
         if kwargs["opt"] == "RMSProp":
             self.optimizer = optimizers.RMSprop(lr=lr, alpha=0.9, eps=1e-06)
         elif kwargs["opt"] == "Adam":
@@ -64,6 +64,8 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             raise Exception("Not implemented.")
         self.optimizer.setup(self.model)
         self.optimizer.add_hook(HardGradientClipping(-clip, clip))
+        if l2_lambda > 0.0:
+            self.optimizer.add_hook(L2WeightDecay(l2_lambda))
 
 
 class SentenceTrainer(SentencePairTrainer):
