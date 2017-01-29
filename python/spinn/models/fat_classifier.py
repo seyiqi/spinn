@@ -360,6 +360,10 @@ def run(only_forward=False):
         accum_class_preds = deque(maxlen=FLAGS.deq_length)
         accum_class_truth = deque(maxlen=FLAGS.deq_length)
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
+        accum_total_cost = deque(maxlen=FLAGS.deq_length)
+        accum_xent_cost = deque(maxlen=FLAGS.deq_length)
+        accum_trans_cost = deque(maxlen=FLAGS.deq_length)
+        accum_rl_cost = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
         accum_reward = deque(maxlen=FLAGS.deq_length)
@@ -412,17 +416,23 @@ def run(only_forward=False):
                 accum_truth.append(truth)
 
             # Boilerplate for calculating loss.
+            xent_cost_val = xent_loss.data
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
             rl_cost_val = rl_loss.data if rl_loss is not None else 0.0
             accum_class_acc.append(class_acc)
 
             # Accumulate Total Loss Data
             total_cost_val = 0.0
-            total_cost_val += xent_loss.data
+            total_cost_val += xent_cost_val
             if not FLAGS.use_reinforce:
                 total_cost_val += transition_cost_val
             if FLAGS.use_reinforce:
                 total_cost_val += rl_cost_val
+
+            accum_total_cost.append(total_cost_val)
+            accum_xent_cost.append(xent_cost_val)
+            accum_trans_cost.append(transition_cost_val)
+            accum_rl_cost.append(rl_cost_val)
 
             # Accumulate Total Loss Variable
             total_loss = 0.0
@@ -468,6 +478,10 @@ def run(only_forward=False):
                 avg_class_acc = np.array(accum_class_acc).mean()
                 all_preds = flatten(accum_preds)
                 all_truth = flatten(accum_truth)
+                avg_total_cost = np.array(accum_total_cost).mean()
+                avg_xent_cost = np.array(accum_xent_cost).mean()
+                avg_trans_cost = np.array(accum_trans_cost).mean()
+                avg_rl_cost = np.array(accum_rl_cost).mean()
                 if transition_loss is not None:
                     avg_trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
                 else:
@@ -478,13 +492,13 @@ def run(only_forward=False):
                     avg_baseline = np.array(accum_baseline).mean()
                     logger.Log(
                         "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f Time: %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, rl_cost_val,
+                        % (step, avg_class_acc, avg_trans_acc, avg_total_cost, avg_xent_cost, avg_trans_cost, avg_rl_cost,
                             avg_reward, avg_new_rew,
                             avg_time_last_5))
                 else:
                     logger.Log(
                         "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Time: %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, rl_cost_val,
+                        % (step, avg_class_acc, avg_trans_acc, avg_total_cost, avg_xent_cost, avg_trans_cost, avg_rl_cost,
                             avg_time_last_5))
                 if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
@@ -505,6 +519,10 @@ def run(only_forward=False):
                 accum_class_preds.clear()
                 accum_class_truth.clear()
                 accum_class_acc.clear()
+                accum_total_cost.clear()
+                accum_xent_cost.clear()
+                accum_trans_cost.clear()
+                accum_rl_cost.clear()
                 accum_preds.clear()
                 accum_truth.clear()
                 accum_reward.clear()
