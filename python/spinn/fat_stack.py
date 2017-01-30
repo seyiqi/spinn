@@ -21,7 +21,7 @@ from chainer.functions.activation import slstm
 from chainer.utils import type_check
 from spinn.util.batch_softmax_cross_entropy import batch_weighted_softmax_cross_entropy
 
-from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping
+from spinn.util.chainer_blocks import BaseSentencePairTrainer, HardGradientClipping, L2WeightDecay
 from spinn.util.chainer_blocks import LSTMState, Embed, Reduce, LSTMChain
 from spinn.util.chainer_blocks import CrossEntropyClassifier
 from spinn.util.chainer_blocks import bundle, unbundle, the_gpu, to_cpu, to_gpu
@@ -55,7 +55,7 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             else:
                 data[:] = np.random.uniform(-0.1, 0.1, data.shape)
 
-    def init_optimizer(self, lr=0.001, clip=5.0, **kwargs):
+    def init_optimizer(self, lr=0.001, clip=5.0, l2_lambda=2e-5, **kwargs):
         if kwargs["opt"] == "RMSProp":
             self.optimizer = optimizers.RMSprop(lr=lr, alpha=0.9, eps=1e-06)
         elif kwargs["opt"] == "Adam":
@@ -64,6 +64,8 @@ class SentencePairTrainer(BaseSentencePairTrainer):
             raise Exception("Not implemented.")
         self.optimizer.setup(self.model)
         self.optimizer.add_hook(HardGradientClipping(-clip, clip))
+        if l2_lambda > 0.0:
+            self.optimizer.add_hook(L2WeightDecay(l2_lambda))
 
 
 class SentenceTrainer(SentencePairTrainer):
@@ -278,7 +280,7 @@ class SPINN(Chain):
                 hyp_acc, truth_acc.astype(np.int32))
 
             transition_loss = F.softmax_cross_entropy(
-                hyp_xent, truth_xent.astype(np.int32),
+                hyp_xent, truth_acc.astype(np.int32),
                 normalize=False)
 
             transition_loss *= self.transition_weight
@@ -578,16 +580,18 @@ class BaseModel(Chain):
             self.avg_reward = rewards.mean()
             self.avg_new_rew = new_rewards.mean()
 
-            transition_loss = self.reinforce(new_rewards)
-            transition_loss *= self.transition_weight
+            rl_loss = self.reinforce(new_rewards)
+            rl_loss *= self.transition_weight
+        else:
+            rl_loss = None
 
         if hasattr(transition_acc, 'data'):
             transition_acc = transition_acc.data
 
         if rl_baseline == "policy" and baseline_loss is not None:
-            accum_loss += baseline_loss
+            rl_loss += baseline_loss
 
-        return y, accum_loss, acc, transition_acc, transition_loss
+        return y, accum_loss, acc, transition_acc, transition_loss, rl_loss
 
 
     def run_policy(self, sentences, transitions, y_batch, train, rewards, rl_style):
@@ -632,7 +636,7 @@ class BaseModel(Chain):
 
             Then we want to calculate the objective as so:
 
-            transition_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
+            rl_loss = [0.2, 0.7, 0.6, 0.5] * [0., 0., 1., 1.]
 
             Now this gets slightly tricker when using skips (action==2):
 
@@ -642,7 +646,7 @@ class BaseModel(Chain):
                 [[0.4, 0.6], [0.5, 0.5]]
                 ]
             rewards = [0., 1.]
-            transition_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
+            rl_loss = [0.2, 0.7, 0.5] * [0., 0., 1.]
 
             NOTE: The above example is fictional, and although those values are
             not achievable, is still representative of what is going on.
@@ -664,9 +668,9 @@ class BaseModel(Chain):
         else:
             rewards = expand_along(rewards, self.spinn.transition_mask)
 
-        transition_loss = F.sum(-1. * log_p_preds * rewards) / log_p_preds.shape[0]
+        rl_loss = F.sum(-1. * log_p_preds * rewards) / log_p_preds.shape[0]
 
-        return transition_loss
+        return rl_loss
 
 
 class SentencePairModel(BaseModel):

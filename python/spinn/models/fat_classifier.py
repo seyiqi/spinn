@@ -22,7 +22,7 @@ from spinn.data.boolean import load_boolean_data
 from spinn.data.sst import load_sst_data
 from spinn.data.snli import load_snli_data
 from spinn.util.data import SimpleProgressBar
-from spinn.util.chainer_blocks import gradient_check, l2_cost, flatten
+from spinn.util.chainer_blocks import gradient_check, flatten
 
 import spinn.fat_stack
 import spinn.plain_rnn
@@ -38,6 +38,9 @@ from sklearn import metrics
 
 
 FLAGS = gflags.FLAGS
+
+avg_train_time = deque(maxlen=5)
+avg_eval_time = deque(maxlen=5)
 
 
 def build_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_dim,
@@ -82,12 +85,14 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
 
     accum_preds = deque()
     accum_truth = deque()
-    model = classifier_trainer.optimizer.target
+    accum_time = deque()
+    model = classifier_trainer.model
     evalb_parses = []
     parses = []
     for i, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch) in enumerate(eval_set[1]):
         # Calculate Local Accuracies
         if eval_data_limit == -1 or i < eval_data_limit:
+            start = time.time()
             ret = classifier_trainer.forward({
                 "sentences": eval_X_batch,
                 "transitions": eval_transitions_batch,
@@ -96,8 +101,10 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
                 use_reinforce=False,
                 validate_transitions=FLAGS.validate_transitions,
                 use_random=FLAGS.use_random)
-            y, loss, class_loss, transition_acc, transition_loss = ret
-            acc_value = float(classifier_trainer.model.accuracy.data)
+            y, loss, class_acc, transition_acc, transition_loss, rl_loss = ret
+            end = time.time()
+            acc_value = class_acc
+            accum_time.append((end - start) / float(eval_y_batch.shape[0]))
 
             if transition_loss is not None:
                 preds = [m["preds_cm"] for m in model.spinn.memories]
@@ -179,9 +186,12 @@ def evaluate(classifier_trainer, eval_set, logger, step, eval_data_limit=-1,
         trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
     else:
         trans_acc = 0.0
+    avg_time = np.array(accum_time).astype(np.float32).mean()
+    avg_eval_time.append(avg_time)
+    avg_time_last_5 = np.array(avg_eval_time).astype(np.float32).mean()
 
-    logger.Log("Step: %i\tEval acc: %f\t %f\t%s" %
-              (step, acc_accum / eval_batches, trans_acc, eval_set[0]))
+    logger.Log("Step: %i\tEval acc: %f\t %f\t%s Time: %5f" %
+              (step, acc_accum / eval_batches, trans_acc, eval_set[0], avg_time_last_5))
     return acc_accum / eval_batches
 
 
@@ -329,6 +339,7 @@ def run(only_forward=False):
         lr=FLAGS.learning_rate,
         clip=FLAGS.clipping_max_value,
         opt=FLAGS.opt,
+        l2_lambda=FLAGS.l2_lambda,
         )
 
     model = classifier_trainer.optimizer.target
@@ -349,6 +360,10 @@ def run(only_forward=False):
         accum_class_preds = deque(maxlen=FLAGS.deq_length)
         accum_class_truth = deque(maxlen=FLAGS.deq_length)
         accum_class_acc = deque(maxlen=FLAGS.deq_length)
+        accum_total_cost = deque(maxlen=FLAGS.deq_length)
+        accum_xent_cost = deque(maxlen=FLAGS.deq_length)
+        accum_trans_cost = deque(maxlen=FLAGS.deq_length)
+        accum_rl_cost = deque(maxlen=FLAGS.deq_length)
         accum_preds = deque(maxlen=FLAGS.deq_length)
         accum_truth = deque(maxlen=FLAGS.deq_length)
         accum_reward = deque(maxlen=FLAGS.deq_length)
@@ -356,6 +371,9 @@ def run(only_forward=False):
         accum_baseline = deque(maxlen=FLAGS.deq_length)
         printed_total_weights = False
         for step in range(step, FLAGS.training_steps):
+
+            start = time.time()
+
             X_batch, transitions_batch, y_batch, _ = training_data_iter.next()
 
             # Reset cached gradients.
@@ -372,7 +390,7 @@ def run(only_forward=False):
                     rl_style=FLAGS.rl_style,
                     rl_baseline=FLAGS.rl_baseline,
                     use_random=FLAGS.use_random)
-            y, xent_loss, class_acc, transition_acc, transition_loss = ret
+            y, xent_loss, class_acc, transition_acc, transition_loss, rl_loss = ret
 
             xent_loss *= FLAGS.y_lambda
 
@@ -398,24 +416,31 @@ def run(only_forward=False):
                 accum_truth.append(truth)
 
             # Boilerplate for calculating loss.
+            xent_cost_val = xent_loss.data
             transition_cost_val = transition_loss.data if transition_loss is not None else 0.0
+            rl_cost_val = rl_loss.data if rl_loss is not None else 0.0
             accum_class_acc.append(class_acc)
-
-            # Extract L2 Cost
-            l2_loss = l2_cost(model, FLAGS.l2_lambda)
 
             # Accumulate Total Loss Data
             total_cost_val = 0.0
-            total_cost_val += xent_loss.data
-            total_cost_val += l2_loss.data
-            total_cost_val += transition_cost_val
+            total_cost_val += xent_cost_val
+            if not FLAGS.use_reinforce:
+                total_cost_val += transition_cost_val
+            if FLAGS.use_reinforce:
+                total_cost_val += rl_cost_val
+
+            accum_total_cost.append(total_cost_val)
+            accum_xent_cost.append(xent_cost_val)
+            accum_trans_cost.append(transition_cost_val)
+            accum_rl_cost.append(rl_cost_val)
 
             # Accumulate Total Loss Variable
             total_loss = 0.0
             total_loss += xent_loss
-            total_loss += l2_loss
-            if hasattr(transition_loss, 'backward'):
+            if not FLAGS.use_reinforce and hasattr(transition_loss, 'backward'):
                 total_loss += transition_loss
+            if FLAGS.use_reinforce and hasattr(rl_loss, 'backward'):
+                total_loss += rl_loss
 
             # Get gradients
             total_loss.backward()
@@ -433,6 +458,9 @@ def run(only_forward=False):
                     # Fortunately, they tend to have some sort of built-in decay.
                     pass
 
+            end = time.time()
+            avg_time = (end - start) / float(y_batch.shape[0])
+            avg_train_time.append(avg_time)
 
             # Accumulate accuracy for current interval.
             acc_val = float(classifier_trainer.model.accuracy.data)
@@ -446,25 +474,31 @@ def run(only_forward=False):
 
             if step % FLAGS.statistics_interval_steps == 0:
                 progress_bar.finish()
+                avg_time_last_5 = np.array(avg_train_time).astype(np.float32).mean()
                 avg_class_acc = np.array(accum_class_acc).mean()
                 all_preds = flatten(accum_preds)
                 all_truth = flatten(accum_truth)
+                avg_total_cost = np.array(accum_total_cost).mean()
+                avg_xent_cost = np.array(accum_xent_cost).mean()
+                avg_trans_cost = np.array(accum_trans_cost).mean()
+                avg_rl_cost = np.array(accum_rl_cost).mean()
                 if transition_loss is not None:
                     avg_trans_acc = metrics.accuracy_score(all_preds, all_truth) if len(all_preds) > 0 else 0.0
                 else:
                     avg_trans_acc = 0.0
                 if FLAGS.use_reinforce:
-                    avg_reward = np.array(accum_reward).mean()
                     avg_new_rew = np.array(accum_new_rew).mean()
                     avg_baseline = np.array(accum_baseline).mean()
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data,
-                            avg_reward, avg_new_rew, avg_baseline))
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f Time: %5f"
+                        % (step, avg_class_acc, avg_trans_acc, avg_total_cost, avg_xent_cost, avg_trans_cost, avg_rl_cost,
+                            avg_new_rew,
+                            avg_time_last_5))
                 else:
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f"
-                        % (step, avg_class_acc, avg_trans_acc, total_cost_val, xent_loss.data, transition_cost_val, l2_loss.data))
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Time: %5f"
+                        % (step, avg_class_acc, avg_trans_acc, avg_total_cost, avg_xent_cost, avg_trans_cost, avg_rl_cost,
+                            avg_time_last_5))
                 if FLAGS.transitions_confusion_matrix:
                     cm = metrics.confusion_matrix(
                         np.array(all_preds),
@@ -484,6 +518,10 @@ def run(only_forward=False):
                 accum_class_preds.clear()
                 accum_class_truth.clear()
                 accum_class_acc.clear()
+                accum_total_cost.clear()
+                accum_xent_cost.clear()
+                accum_trans_cost.clear()
+                accum_rl_cost.clear()
                 accum_preds.clear()
                 accum_truth.clear()
                 accum_reward.clear()
@@ -581,7 +619,7 @@ if __name__ == '__main__':
     gflags.DEFINE_boolean("use_encode", False, "Encode output of projection layer using bidirectional RNN")
     gflags.DEFINE_integer("projection_dim", -1, "Dimension for projection network.")
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
-    gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the RHS.")
+    gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the LHS.")
     gflags.DEFINE_boolean("validate_transitions", True, "Constrain predicted transitions to ones"
         "that give a valid parse tree.")
     gflags.DEFINE_boolean("use_tracking_lstm", True,
