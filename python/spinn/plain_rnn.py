@@ -102,9 +102,9 @@ class BaseModel(Chain):
 
     def embed(self, x, train):
         if self.fix_embed:
-            return Variable(self.initial_embeddings.take(x, axis=0), volatile=not train)
+            return Variable(self.initial_embeddings.take(x.data, axis=0), volatile=not train)
         else:
-            return self._embed(Variable(x, volatile=not train))
+            return self._embed(x)
 
     def run_mlp(self, h, train):
         h = self.l0(h)
@@ -121,20 +121,23 @@ class SentencePairModel(BaseModel):
         batch_size = sentences.shape[0]
 
         # Build Tokens
-        x_prem = sentences[:,:,0]
-        x_hyp = sentences[:,:,1]
+        x_prem = Variable(sentences[:,:,0], volatile=not train)
+        x_hyp = Variable(sentences[:,:,1], volatile=not train)
+        x = F.concat([x_prem, x_hyp], axis=0)
 
-        embeds_prem = self.embed(x_prem, train)
-        embeds_hyp = self.embed(x_hyp, train)
-
-        _, h_prem, _ = self.fwd_rnn(embeds_prem, train, keep_hs=False)
-        _, h_hyp, _ = self.fwd_rnn(embeds_hyp, train, keep_hs=False)
-        h = F.concat([h_prem, h_hyp], axis=1)
+        emb = self.embed(x, train)
+        _, hh, _ = self.fwd_rnn(emb, train, keep_hs=False)
+        h = F.concat([hh[:batch_size], hh[batch_size:]], axis=1)
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
-        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
-        self.accuracy = self.accFun(y, self.xp.array(y_batch))
+        if y_batch is not None:
+            accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+            self.accuracy = self.accFun(y, self.xp.array(y_batch))
+            acc = self.accuracy.data
+        else:
+            accum_loss = 0.0
+            acc = 0.0
 
         return y, accum_loss, self.accuracy.data, 0.0, None, None
 
@@ -144,7 +147,7 @@ class SentenceModel(BaseModel):
         batch_size = sentences.shape[0]
 
         # Build Tokens
-        x = sentences
+        x = Variable(sentences, volatile=not train)
 
         embeds = self.embed(x, train)
 
@@ -152,7 +155,12 @@ class SentenceModel(BaseModel):
         y = self.run_mlp(h, train)
 
         # Calculate Loss & Accuracy.
-        accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
-        self.accuracy = self.accFun(y, self.xp.array(y_batch))
+        if y_batch is not None:
+            accum_loss = self.classifier(y, Variable(y_batch, volatile=not train), train)
+            self.accuracy = self.accFun(y, self.xp.array(y_batch))
+            acc = self.accuracy.data
+        else:
+            accum_loss = 0.0
+            acc = 0.0
 
         return y, accum_loss, self.accuracy.data, 0.0, None, None
