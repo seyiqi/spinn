@@ -487,13 +487,12 @@ def run(only_forward=False):
                 else:
                     avg_trans_acc = 0.0
                 if FLAGS.use_reinforce:
-                    avg_reward = np.array(accum_reward).mean()
                     avg_new_rew = np.array(accum_new_rew).mean()
                     avg_baseline = np.array(accum_baseline).mean()
                     logger.Log(
-                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f %5f Time: %5f"
+                        "Step: %i\tAcc: %f\t%f\tCost: %5f %5f %5f %5f Rewards: %5f Time: %5f"
                         % (step, avg_class_acc, avg_trans_acc, avg_total_cost, avg_xent_cost, avg_trans_cost, avg_rl_cost,
-                            avg_reward, avg_new_rew,
+                            avg_new_rew,
                             avg_time_last_5))
                 else:
                     logger.Log(
