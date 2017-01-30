@@ -130,7 +130,7 @@ class SPINN(Chain):
 
     def __init__(self, args, vocab, normalization=L.BatchNormalization, use_skips=False):
         super(SPINN, self).__init__(
-            reduce=Reduce(args.size, args.tracker_size))
+            reduce=Reduce(args.size, args.tracker_size, use_tracking_in_composition=args.use_tracking_in_composition))
         if args.tracker_size is not None:
             self.add_link('tracker', Tracker(
                 args.size, args.tracker_size,
@@ -334,6 +334,7 @@ class BaseModel(Chain):
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
+                 use_tracking_in_composition=True,
                  projection_dim=None,
                  encoding_dim=None,
                  use_encode=False,
@@ -398,6 +399,7 @@ class BaseModel(Chain):
              tracking_lstm_hidden_dim=tracking_lstm_hidden_dim,
              transition_weight=transition_weight,
              use_tracking_lstm=use_tracking_lstm,
+             use_tracking_in_composition=use_tracking_in_composition,
              use_sentence_pair=use_sentence_pair,
              num_mlp_layers=num_mlp_layers,
              mlp_bn=mlp_bn,
@@ -425,6 +427,7 @@ class BaseModel(Chain):
         args = {
             'size': projection_dim,
             'tracker_size': tracking_lstm_hidden_dim if use_tracking_lstm else None,
+            'use_tracking_in_composition': use_tracking_in_composition,
             'transition_weight': transition_weight,
             'input_dropout_rate': 1. - input_keep_rate,
             'use_input_norm': use_input_norm,

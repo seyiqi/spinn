@@ -55,6 +55,7 @@ def build_model(model_cls, trainer_cls, vocab_size, model_dim, word_embedding_di
              tracking_lstm_hidden_dim=FLAGS.tracking_lstm_hidden_dim,
              transition_weight=FLAGS.transition_weight,
              use_tracking_lstm=FLAGS.use_tracking_lstm,
+             use_tracking_in_composition=FLAGS.use_tracking_in_composition,
              use_sentence_pair=use_sentence_pair,
              num_mlp_layers=FLAGS.num_mlp_layers,
              mlp_bn=FLAGS.mlp_bn,
@@ -624,6 +625,8 @@ if __name__ == '__main__':
         "that give a valid parse tree.")
     gflags.DEFINE_boolean("use_tracking_lstm", True,
         "Whether to use LSTM in the tracking unit")
+    gflags.DEFINE_boolean("use_tracking_in_composition", True,
+        "Whether to use LSTM state in the composition function.")
     gflags.DEFINE_float("semantic_classifier_keep_rate", 0.9,
         "Used for dropout in the semantic task classifier.")
     gflags.DEFINE_float("embedding_keep_rate", 1.0,

@@ -515,11 +515,11 @@ class Reduce(Chain):
             tracker is present.
     """
 
-    def __init__(self, size, tracker_size=None):
+    def __init__(self, size, tracker_size=None, use_tracking_in_composition=True):
         super(Reduce, self).__init__(
             left=L.Linear(size, 5 * size),
             right=L.Linear(size, 5 * size, nobias=True))
-        if tracker_size is not None:
+        if tracker_size is not None and use_tracking_in_composition:
             self.add_link('track',
                           L.Linear(tracker_size, 5 * size, nobias=True))
 

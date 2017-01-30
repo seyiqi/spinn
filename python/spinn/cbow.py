@@ -65,6 +65,7 @@ class BaseModel(Chain):
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
                  use_tracking_lstm=True,
+                 use_tracking_in_composition=True,
                  use_shift_composition=True,
                  use_history=False,
                  save_stack=False,
