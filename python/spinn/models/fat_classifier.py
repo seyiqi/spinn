@@ -781,7 +781,7 @@ if __name__ == '__main__':
         FLAGS.sha = os.popen('git rev-parse HEAD').read().strip()
 
     # HACK: The "use_encode" flag will be deprecated. Instead use something like encode_style=LSTM.
-    if FLAGS.use_encode:
+    if FLAGS.use_encode and FLAGS.encode_style is None:
         FLAGS.encode_style = "LSTM"
 
     run(only_forward=FLAGS.expanded_eval_only_mode)

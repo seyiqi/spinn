@@ -16,7 +16,7 @@ from spinn.util.blocks import reverse_tensor
 from spinn.util.blocks import bundle, unbundle, to_cpu, to_gpu, treelstm, lstm
 from spinn.util.blocks import get_h, get_c
 from spinn.util.misc import Args, Vocab, Example
-from spinn.util.blocks import HeKaimingInitializer
+from spinn.util.blocks import HeKaimingInitializer, MaskedConv1d
 
 
 T_SKIP   = 2
@@ -553,6 +553,9 @@ class BaseModel(nn.Module):
             encoding_net = LSTM(word_embedding_dim, model_dim,
                 num_layers=num_layers, bidirectional=bidirectional, reverse=reverse,
                 dropout=dropout)
+        elif encode_style == "CNN":
+            encoding_net = MaskedConv1d(word_embedding_dim, model_dim,
+                kernel_size=3)
         else:
             raise NotImplementedError
         return encoding_net

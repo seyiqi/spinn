@@ -532,3 +532,21 @@ def Linear(initializer=DefaultUniformInitializer, bias_initializer=ZeroInitializ
             if self.bias is not None:
                 bias_initializer(self.bias)
     return CustomLinear
+
+
+class MaskedConv1d(nn.Module):
+    def __init__(self, inp_chan, outp_chan, kernel_size, reverse=False):
+        super(MaskedConv1d, self).__init__()
+        self.padding = kernel_size - 1
+        self.reverse = reverse
+        self.conv = nn.Conv1d(inp_chan, outp_chan, kernel_size, padding=self.padding)
+
+    def forward(self, x):
+        outp = self.conv(x.transpose(1,2))
+        seq_length = outp.size(2)
+        if self.reverse:
+            outp = outp[:, :, self.padding:]
+        else:
+            outp = outp[:, :, :seq_length-self.padding]
+        outp = outp.transpose(1,2)
+        return outp
