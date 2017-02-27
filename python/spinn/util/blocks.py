@@ -550,3 +550,44 @@ class MaskedConv1d(nn.Module):
             outp = outp[:, :, :seq_length-self.padding]
         outp = outp.transpose(1,2)
         return outp
+
+
+class QRNN(nn.Module):
+    def __init__(self, inp_chan, outp_chan, kernel_size, reverse=False):
+        super(QRNN, self).__init__()
+        self.size = outp_chan
+        self.reverse = reverse
+        self.conv = MaskedConv1d(inp_chan, outp_chan*3, kernel_size, reverse)
+
+    def strnn(self, f, z, hinit):
+        batch_size, seq_length, model_dim = f.size()
+        h = [hinit]
+
+        # Kernel
+        ts = range(seq_length-1,-1,-1) if self.reverse else range(seq_length)
+        for t in ts:
+            prev_h = h[-1]
+            ft = f[:, t, :]
+            zt = z[:, t, :]
+
+            ht = prev_h * ft + zt
+            h.append(ht)
+
+        hs = torch.cat([hh.unsqueeze(1) for hh in h[1:]], 1)
+        return hs
+
+    def forward(self, x):
+        batch_size = x.size()[0]
+
+        f, z, o = torch.chunk(self.conv(x), 3, 2)
+        f = F.sigmoid(f)
+        z = (1 - f) * F.tanh(z)
+        o = F.sigmoid(o)
+
+        self.c = Variable(torch.from_numpy(np.zeros((batch_size, self.size),
+                dtype=np.float32)), volatile=not self.training)
+
+        self.c = self.strnn(f, z, self.c[:batch_size])
+        self.h = self.c * o
+
+        return self.h

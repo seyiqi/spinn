@@ -709,7 +709,7 @@ if __name__ == '__main__':
     # Encode settings.
     gflags.DEFINE_boolean("use_encode", False, "Encode embeddings with sequential network.")
     gflags.DEFINE_enum("encode_style", None, ["LSTM", "CNN", "QRNN"], "Encode embeddings with sequential context.")
-    gflags.DEFINE_boolean("encode_reverse", False, "Encode in reverse order.")
+    gflags.DEFINE_boolean("encode_reverse", True, "Encode in reverse order.")
     gflags.DEFINE_boolean("encode_bidirectional", False, "Encode in both directions.")
     gflags.DEFINE_integer("encode_num_layers", 1, "RNN layers in encoding net.")
 

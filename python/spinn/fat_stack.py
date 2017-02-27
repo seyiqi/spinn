@@ -16,7 +16,7 @@ from spinn.util.blocks import reverse_tensor
 from spinn.util.blocks import bundle, unbundle, to_cpu, to_gpu, treelstm, lstm
 from spinn.util.blocks import get_h, get_c
 from spinn.util.misc import Args, Vocab, Example
-from spinn.util.blocks import HeKaimingInitializer, MaskedConv1d
+from spinn.util.blocks import HeKaimingInitializer, MaskedConv1d, QRNN
 
 
 T_SKIP   = 2
@@ -555,7 +555,10 @@ class BaseModel(nn.Module):
                 dropout=dropout)
         elif encode_style == "CNN":
             encoding_net = MaskedConv1d(word_embedding_dim, model_dim,
-                kernel_size=3)
+                kernel_size=3, reverse=reverse)
+        elif encode_style == "QRNN":
+            encoding_net = QRNN(word_embedding_dim, model_dim,
+                kernel_size=3, reverse=reverse)
         else:
             raise NotImplementedError
         return encoding_net
