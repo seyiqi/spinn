@@ -219,7 +219,7 @@ class SPINN(nn.Module):
 
         batch_size = t_mask.max()
         preds = []
-        for batch_idx in range(batch_size):
+        for batch_idx in range(batch_size + 1):
             preds.append(source[t_mask == batch_idx])
 
         return np.array(preds)
@@ -276,6 +276,10 @@ class SPINN(nn.Module):
     def loss_phase_hook(self):
         pass
 
+    def run_tracker(self, top_buf, top_stack_1, top_stack_2, t_mask):
+        tracker_h, tracker_c = self.tracker(top_buf, top_stack_1, top_stack_2)
+        return tracker_h, tracker_c
+
     def run(self, inp_transitions, run_internal_parser=False, use_internal_parser=False, validate_transitions=True):
         transition_loss = None
         transition_acc = 0.0
@@ -324,8 +328,14 @@ class SPINN(nn.Module):
                     # top_stack_1 = bundle(stack[-1] if len(stack) > 0 else zeros for stack in self.stacks)
                     # top_stack_2 = bundle(stack[-2] if len(stack) > 1 else zeros for stack in self.stacks)
 
+                # Indices of examples that have a transition.
+                t_mask = np.arange(sub_batch_size)
+
+                if not self.use_skips:
+                    t_mask = t_mask[cant_skip]
+
                 # Get hidden output from the tracker. Used to predict transitions.
-                tracker_h, tracker_c = self.tracker(top_buf, top_stack_1, top_stack_2)
+                tracker_h, tracker_c = self.run_tracker(top_buf, top_stack_1, top_stack_2, t_mask)
 
                 if hasattr(self, 'transition_net'):
                     transition_inp = tracker_h
@@ -351,16 +361,12 @@ class SPINN(nn.Module):
 
                     t_preds = transition_preds
 
-                    # Indices of examples that have a transition.
-                    t_mask = np.arange(sub_batch_size)
-
                     # Filter to non-SKIP values
                     # =========================
 
                     if not self.use_skips:
                         t_preds = t_preds[cant_skip]
                         t_given = t_given[cant_skip]
-                        t_mask = t_mask[cant_skip]
 
                         # Be careful when filtering distributions. These values are used to
                         # calculate loss and need to be used in backprop.

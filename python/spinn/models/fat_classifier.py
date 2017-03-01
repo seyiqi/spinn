@@ -450,7 +450,7 @@ def run(only_forward=False):
             transition_acc = model.transition_acc if hasattr(model, 'transition_acc') else 0.0
             transition_loss = model.transition_loss if hasattr(model, 'transition_loss') else None
             rl_loss = model.rl_loss if hasattr(model, 'rl_loss') else None
-            policy_loss = model.policy_loss if hasattr(model, 'policy_loss') else None
+            value_loss = model.value_loss if hasattr(model, 'value_loss') else None
             rae_loss = model.spinn.rae_loss if hasattr(model, 'spinn') and hasattr(model.spinn, 'rae_loss') else None
             leaf_loss = model.spinn.leaf_loss if hasattr(model, 'spinn') and hasattr(model.spinn, 'leaf_loss') else None
             gen_loss = model.spinn.gen_loss if hasattr(model, 'spinn') and hasattr(model.spinn, 'gen_loss') else None
@@ -474,6 +474,17 @@ def run(only_forward=False):
             if gen_loss is not None:
                 A.add('gen_acc', model.spinn.gen_acc)
 
+            if value_loss is not None:
+                expanded_baseline = model.expanded_baseline
+                expanded_rewards = model.expanded_rewards
+                exp_rew = torch.round(expanded_baseline)
+                # TODO: Support for xent reward.
+                baseline_acc = exp_rew.eq(expanded_rewards).sum() / float(exp_rew.size(0))
+            else:
+                baseline_acc = 0.0
+            A.add('baseline_acc', baseline_acc)
+            M.add('baseline_acc', baseline_acc)
+
             # Note: Keep track of transition_acc, although this is a naive average.
             # Should be weighted by length of sequences in batch.
             M.add('transition_acc', transition_acc)
@@ -486,7 +497,7 @@ def run(only_forward=False):
             transition_cost_val = transition_loss.data[0] if transition_loss is not None else 0.0
             l2_cost_val = l2_loss.data[0] if l2_loss is not None else 0.0
             rl_cost_val = rl_loss.data[0] if rl_loss is not None else 0.0
-            policy_cost_val = policy_loss.data[0] if policy_loss is not None else 0.0
+            value_cost_val = value_loss.data[0] if value_loss is not None else 0.0
             rae_cost_val = rae_loss.data[0] if rae_loss is not None else 0.0
             leaf_cost_val = leaf_loss.data[0] if leaf_loss is not None else 0.0
             gen_cost_val = gen_loss.data[0] if gen_loss is not None else 0.0
@@ -498,7 +509,7 @@ def run(only_forward=False):
                 total_cost_val += transition_cost_val
             total_cost_val += l2_cost_val
             total_cost_val += rl_cost_val
-            total_cost_val += policy_cost_val
+            total_cost_val += value_cost_val
             total_cost_val += rae_cost_val
             total_cost_val += leaf_cost_val
             total_cost_val += gen_cost_val
@@ -509,12 +520,14 @@ def run(only_forward=False):
             M.add('l2_cost', l2_cost_val)
 
             # Logging for RL
-            rl_keys = ['rl_loss', 'policy_loss', 'norm_rewards', 'norm_baseline', 'norm_advantage']
+            rl_keys = ['rl_loss', 'norm_rewards', 'norm_baseline', 'norm_advantage']
             for k in rl_keys:
                 if hasattr(model, k):
                     val = getattr(model, k)
                     val = val.data[0] if isinstance(val, Variable) else val
                     M.add(k, val)
+            if value_loss is not None:
+                M.add('value_loss', value_loss.data[0])
 
             # Accumulate Total Loss Variable
             total_loss = 0.0
@@ -525,8 +538,8 @@ def run(only_forward=False):
                 total_loss += transition_loss
             if rl_loss is not None:
                 total_loss += rl_loss
-            if policy_loss is not None:
-                total_loss += policy_loss
+            if value_loss is not None:
+                total_loss += value_loss
             if rae_loss is not None:
                 total_loss += rae_loss
             if leaf_loss is not None:
@@ -543,8 +556,8 @@ def run(only_forward=False):
                     losses.append(('transition_loss', transition_loss))
                 if rl_loss is not None:
                     losses.append(('rl_loss', rl_loss))
-                if policy_loss is not None:
-                    losses.append(('policy_loss', policy_loss))
+                if value_loss is not None:
+                    losses.append(('value_loss', value_loss))
                 debug_gradient(model, losses)
                 import ipdb; ipdb.set_trace()
 
@@ -594,12 +607,13 @@ def run(only_forward=False):
                     "step": step,
                     "class_acc": avg_class_acc,
                     "transition_acc": avg_trans_acc,
+                    "baseline_acc": A.get_avg('baseline_acc'),
                     "total_cost": total_cost_val,
                     "xent_cost": xent_cost_val,
                     "transition_cost": transition_cost_val,
                     "l2_cost": l2_cost_val,
                     "rl_cost": rl_cost_val,
-                    "policy_cost": policy_cost_val,
+                    "value_cost": value_cost_val,
                     "rae_cost": rae_cost_val,
                     "leaf_acc": avg_leaf_acc,
                     "leaf_cost": leaf_cost_val,
@@ -611,6 +625,8 @@ def run(only_forward=False):
 
                 # Accuracy Component.
                 stats_str += " Acc: {class_acc:.5f} {transition_acc:.5f}"
+                if value_loss is not None:
+                    stats_str += " b{baseline_acc:.5f}"
                 if leaf_loss is not None:
                     stats_str += " leaf{leaf_acc:.5f}"
                 if gen_loss is not None:
@@ -620,8 +636,8 @@ def run(only_forward=False):
                 stats_str += " Cost: {total_cost:.5f} {xent_cost:.5f} {transition_cost:.5f} {l2_cost:.5f}"
                 if rl_loss is not None:
                     stats_str += " r{rl_cost:.5f}"
-                if policy_loss is not None:
-                    stats_str += " p{policy_cost:.5f}"
+                if value_loss is not None:
+                    stats_str += " v{value_cost:.5f}"
                 if rae_loss is not None:
                     stats_str += " rae{rae_cost:.5f}"
                 if leaf_loss is not None:
@@ -740,7 +756,7 @@ if __name__ == '__main__':
 
     # RL settings.
     gflags.DEFINE_float("rl_mu", 0.1, "Use in exponential moving average baseline.")
-    gflags.DEFINE_enum("rl_baseline", "ema", ["ema", "value", "policy"],
+    gflags.DEFINE_enum("rl_baseline", "ema", ["ema", "value", "greedy", "fine-grained"],
         "Different configurations to approximate reward function.")
     gflags.DEFINE_enum("rl_reward", "standard", ["standard", "xent"],
         "Different reward functions to use.")

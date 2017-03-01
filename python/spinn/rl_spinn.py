@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from spinn.util.blocks import BaseSentencePairTrainer, Reduce
-from spinn.util.blocks import LSTMState, Embed, MLP
+from spinn.util.blocks import LSTMState, Embed, MLP, Linear
 from spinn.util.blocks import bundle, unbundle, to_cpu, to_gpu, treelstm, lstm
 from spinn.util.blocks import get_h, get_c
 from spinn.util.misc import Args, Vocab, Example
@@ -49,6 +49,10 @@ class RLSPINN(SPINN):
             transition_preds = transition_dist.argmax(axis=1)
         return transition_preds
 
+    def forward(self, *args, **kwargs):
+        self.baselines = []
+        return super(RLSPINN, self).forward(*args, **kwargs)
+
 
 class RLBaseModel(BaseModel):
 
@@ -61,12 +65,13 @@ class RLBaseModel(BaseModel):
                  rl_weight=None,
                  rl_whiten=None,
                  **kwargs):
+        self.rl_baseline = rl_baseline
+
         super(RLBaseModel, self).__init__(**kwargs)
 
         self.kwargs = kwargs
 
         self.rl_mu = rl_mu
-        self.rl_baseline = rl_baseline
         self.rl_reward = rl_reward
         self.rl_weight = rl_weight
         self.rl_whiten = rl_whiten
@@ -91,9 +96,29 @@ class RLBaseModel(BaseModel):
                 num_classes=1,
                 use_embed=False,
                 )
+        elif self.rl_baseline == "fine-grained":
+            self.value_net = Linear()(kwargs["tracking_lstm_hidden_dim"], 1)
 
     def build_spinn(self, args, vocab, use_skips):
-        return RLSPINN(args, vocab, use_skips=use_skips)
+
+        spinn = RLSPINN(args, vocab, use_skips=use_skips)
+
+        if self.rl_baseline == "fine-grained":
+            this = self
+            def run_tracker(self, top_buf, stack_1, stack_2, t_mask):
+                tracker_h, tracker_c = super(RLSPINN, self).run_tracker(top_buf, stack_1, stack_2, t_mask)
+
+                # Estimate Reward.
+                baseline = this.value_net(tracker_h)
+                t_mask = Variable(torch.from_numpy(t_mask), volatile=not self.training)
+                self.baselines.append(baseline.index_select(0, t_mask))
+
+                return tracker_h, tracker_c
+
+            funcType = type(spinn.run_tracker)
+            spinn.run_tracker = funcType(run_tracker, spinn, RLSPINN)
+
+        return spinn
 
     def run_greedy(self, sentences, transitions):
         if self.use_sentence_pair:
@@ -125,11 +150,18 @@ class RLBaseModel(BaseModel):
 
         return rewards
 
-    def build_baseline(self, output, rewards, sentences, transitions, y_batch=None, embeds=None):
+    def reinforce(self, output, rewards, sentences, transitions, y_batch=None, embeds=None):
+        t_preds, t_logits, t_given, t_mask = self.spinn.get_statistics()
+
+        expand_advantage = True
+
+        # Baseline.
         if self.rl_baseline == "ema":
             mu = self.rl_mu
             self.baseline[0] = self.baseline[0] * (1 - mu) + rewards.mean() * mu
             baseline = self.baseline[0]
+
+            advantage = rewards - baseline
         elif self.rl_baseline == "value":
             # Pass inputs to Value Net
             if embeds is not None:
@@ -145,6 +177,21 @@ class RLBaseModel(BaseModel):
             self.value_loss = nn.MSELoss()(value_prob, to_gpu(Variable(rewards, volatile=not self.training)))
 
             baseline = value_prob.data.cpu()
+
+            advantage = rewards - baseline
+        elif self.rl_baseline == "fine-grained":
+            baseline = torch.cat(self.spinn.baselines, 0)
+
+            indices = torch.from_numpy(t_mask).long()
+            expanded_rewards = rewards.index_select(0, indices)
+            expand_advantage = False
+
+            # Save MSE Loss using Reward as target
+            self.value_loss = nn.MSELoss()(baseline, to_gpu(Variable(expanded_rewards, volatile=not self.training)))
+
+            baseline = baseline.data.cpu()
+
+            advantage = expanded_rewards - baseline
         elif self.rl_baseline == "greedy":
             # Pass inputs to Greedy Max
             greedy_outp = self.run_greedy(sentences, transitions)
@@ -155,32 +202,41 @@ class RLBaseModel(BaseModel):
             greedy_rewards = self.build_reward(logits, target)
 
             baseline = greedy_rewards
+
+            advantage = rewards - baseline
         else:
             raise NotImplementedError
 
-        return baseline
+        # Whiten advantage.
+        if self.rl_whiten:
+            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-    def reinforce(self, rewards):
-        t_preds, t_logits, t_given, t_mask = self.spinn.get_statistics()
+        if expand_advantage:
+            indices = torch.from_numpy(t_mask).long()
+            advantage = advantage.index_select(0, indices)
 
-        # TODO: Many of these ops are on the cpu. Might be worth shifting to GPU.
-        if self.use_sentence_pair:
-            # Handles the case of SNLI where each reward is used for two sentences.
-            rewards = torch.cat([rewards, rewards], 0)
-
-        # Expand rewards.
-        if not self.spinn.use_skips:
-            rewards = rewards.index_select(0, torch.from_numpy(t_mask).long())
+        # Expand baseline for use in baseline acc.
+        if self.rl_baseline == "ema":
+            raise NotImplementedError
+        elif self.rl_baseline == "value":
+            raise NotImplementedError
+        elif self.rl_baseline == "fine-grained":
+            pass
+        elif self.rl_baseline == "greedy":
+            raise NotImplementedError
         else:
             raise NotImplementedError
 
-        log_p_action = torch.cat([t_logits[i, p] for i, p in enumerate(t_preds)], 0)
+        preds = t_logits.max(1)[1].data.view(-1).numpy()
 
-        rl_loss = -1. * torch.sum(log_p_action * to_gpu(Variable(rewards, volatile=log_p_action.volatile)))
+        # Reinforce.
+        log_p_action = torch.cat([t_logits[i, p] for i, p in enumerate(preds)], 0)
+
+        rl_loss = -1. * torch.sum(log_p_action * to_gpu(Variable(advantage, volatile=log_p_action.volatile)))
         rl_loss /= log_p_action.size(0)
         rl_loss *= self.rl_weight
 
-        return rl_loss
+        return rl_loss, expanded_rewards, baseline, advantage
 
     def output_hook(self, output, sentences, transitions, y_batch=None, embeds=None):
         if not self.training:
@@ -192,23 +248,22 @@ class RLBaseModel(BaseModel):
         # Get Reward.
         rewards = self.build_reward(logits, target)
 
-        # Get Baseline.
-        baseline = self.build_baseline(output, rewards, sentences, transitions, y_batch, embeds)
-
-        # Calculate advantage.
-        advantage = rewards - baseline
-
-        # Whiten advantage.
-        if self.rl_whiten:
-            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+        # Handles the case of SNLI where each reward is used for two sentences.
+        if self.use_sentence_pair:
+            rewards = torch.cat([rewards, rewards], 0)
 
         # Assign REINFORCE output.
-        self.rl_loss = self.reinforce(advantage)
+        self.rl_loss, expanded_rewards, expanded_baseline, expanded_advantage = self.reinforce(
+            output, rewards, sentences, transitions, y_batch, embeds)
 
         # Cache values for logging.
         self.norm_rewards = rewards.norm()
-        self.norm_baseline = baseline.norm() if hasattr(baseline, 'norm') else baseline
-        self.norm_advantage = advantage.norm()
+        self.norm_advantage = expanded_advantage.norm()
+        self.norm_baseline = expanded_baseline.norm()
+
+        # TODO: Complete this for other baselines.
+        self.expanded_baseline = expanded_baseline
+        self.expanded_rewards = expanded_rewards
 
 
 class SentencePairModel(RLBaseModel):
