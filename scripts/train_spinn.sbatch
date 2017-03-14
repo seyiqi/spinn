@@ -15,6 +15,8 @@ echo $SLURM_JOBID - `hostname` - $SPINN_FLAGS >> ~/spinn_machine_assignments.txt
 # Make sure we have access to HPC-managed libraries.
 module load python/intel/2.7.12 pytorch/intel/20170226 protobuf/intel/3.1.0
 
+pip install --user python-gflags==2.0
+
 # Run.
 export IFS=';'
 for SUB_FLAGS in $SPINN_FLAGS
