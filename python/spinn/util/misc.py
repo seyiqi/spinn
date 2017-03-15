@@ -108,3 +108,27 @@ def recursively_set_device(inp, gpu=-1):
         else:
             inp = inp.cpu()
     return inp
+
+
+def balanced_tree(n, padto=0):
+    """ Returns Shift/Reduce actions associated with a
+        mostly balanced tree (left-skewed) with n leaves.
+
+        TODO: This isn't really the tree that I want....
+    """
+    if n == 0: return []
+    if n == 1: return [0]
+    if n == 2: return [0, 0, 1]
+
+    n_left = (n+1)//2
+    n_right = n - n_left
+
+    left = balanced_tree(n_left)
+    right = balanced_tree(n_right)
+
+    ret = left + right + [1]
+
+    if len(ret) < padto:
+        ret = [2] * (padto - len(ret)) + ret
+
+    return ret

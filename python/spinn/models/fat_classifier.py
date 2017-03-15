@@ -463,7 +463,7 @@ def run(only_forward=False):
                 model.spinn.epsilon = FLAGS.rl_epsilon * math.exp(-step/FLAGS.rl_epsilon_decay)
 
             # Run model.
-            output = model(X_batch, transitions_batch, y_batch,
+            output = model(X_batch, transitions_batch, num_transitions_batch, y_batch,
                 use_internal_parser=FLAGS.use_internal_parser,
                 validate_transitions=FLAGS.validate_transitions
                 )
