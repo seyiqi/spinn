@@ -5,6 +5,8 @@ import itertools
 import time
 import sys
 
+from spinn.util.misc import complete_tree as _complete_tree
+
 import numpy as np
 
 
@@ -358,7 +360,7 @@ def MakeBucketEvalIterator(sources, batch_size):
 
 
 def PreprocessDataset(dataset, vocabulary, seq_length, data_manager, eval_mode=False, logger=None,
-                      sentence_pair_data=False, for_rnn=False, use_left_padding=True):
+                      sentence_pair_data=False, for_rnn=False, use_left_padding=True, complete_tree=False):
     # TODO(SB): Simpler version for plain RNN.
     dataset = TrimDataset(dataset, seq_length, eval_mode=eval_mode, sentence_pair_data=sentence_pair_data)
     dataset = TokensToIDs(vocabulary, dataset, sentence_pair_data=sentence_pair_data)
@@ -406,6 +408,15 @@ def PreprocessDataset(dataset, vocabulary, seq_length, data_manager, eval_mode=F
 
     # NP Array of Strings
     example_ids = np.array([example["example_id"] for example in dataset])
+
+    if complete_tree:
+        padto = transitions.shape[1]
+        if len(num_transitions.shape) == 2:
+            ts1 = [_complete_tree((n + 1) / 2, padto) for n in num_transitions[:,0]]
+            ts2 = [_complete_tree((n + 1) / 2, padto) for n in num_transitions[:,1]]
+            transitions = np.concatenate([np.expand_dims(ts1, 2), np.expand_dims(ts2, 2)], 2)
+        else:
+            transitions = np.array([_complete_tree((n + 1) / 2, padto) for n in num_transitions])
 
     return X, transitions, y, num_transitions, example_ids
 

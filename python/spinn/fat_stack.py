@@ -15,7 +15,7 @@ from spinn.util.blocks import LSTMState, Embed, MLP, Linear, LSTM
 from spinn.util.blocks import reverse_tensor
 from spinn.util.blocks import bundle, unbundle, to_cpu, to_gpu, treelstm, lstm
 from spinn.util.blocks import get_h, get_c
-from spinn.util.misc import Args, Vocab, Example, balanced_tree
+from spinn.util.misc import Args, Vocab, Example
 from spinn.util.blocks import HeKaimingInitializer
 
 
@@ -633,14 +633,8 @@ class SentencePairModel(BaseModel):
         x = np.concatenate([x_prem, x_hyp], axis=0)
 
         # Build Transitions
-        balanced = True
-        padto = num_transitions.max() * 2 - 1
-        if balanced:
-            t_prem = np.array([balanced_tree(n, padto) for n in num_transitions[:,0]])
-            t_hyp = np.array([balanced_tree(n, padto) for n in num_transitions[:,1]])
-        else:
-            t_prem = transitions[:,:,0]
-            t_hyp = transitions[:,:,1]
+        t_prem = transitions[:,:,0]
+        t_hyp = transitions[:,:,1]
         t = np.concatenate([t_prem, t_hyp], axis=0)
 
         example = Example()
@@ -667,12 +661,7 @@ class SentenceModel(BaseModel):
         x = sentences
 
         # Build Transitions
-        balanced = True
-        padto = num_transitions.max() * 2 - 1
-        if balanced:
-            t = np.array([balanced_tree(n, padto) for n in num_transitions])
-        else:
-            t = transitions
+        t = transitions
 
         example = Example()
         example.tokens = to_gpu(Variable(torch.from_numpy(x), volatile=not self.training))

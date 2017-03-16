@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 import os
+import math
 
 
 class GenericClass(object):
@@ -110,25 +111,36 @@ def recursively_set_device(inp, gpu=-1):
     return inp
 
 
-def balanced_tree(n, padto=0):
+def complete_tree(n, padto=0):
     """ Returns Shift/Reduce actions associated with a
-        mostly balanced tree (left-skewed) with n leaves.
-
-        TODO: This isn't really the tree that I want....
+        full binary tree with n leaves.
     """
-    if n == 0: return []
-    if n == 1: return [0]
-    if n == 2: return [0, 0, 1]
+    if n == 0:
+        ret = []
+    elif n == 1:
+        ret = [0]
+    elif n == 2:
+        ret = [0, 0, 1]
+    else:
+        factor = math.log(n, 2)
+        if factor % 1 == 0:
+            n_left = n / 2
+            n_right = n - n_left
+        else:
+            least = 2 ** (int(factor) - 1) 
+            most = 2 ** int(factor)
+            n_right = max(least, n - most)
+            n_left = n - n_right
 
-    n_left = (n+1)//2
-    n_right = n - n_left
+        left = complete_tree(n_left)
+        right = complete_tree(n_right)
 
-    left = balanced_tree(n_left)
-    right = balanced_tree(n_right)
+        ret = left + right + [1]
 
-    ret = left + right + [1]
-
-    if len(ret) < padto:
-        ret = [2] * (padto - len(ret)) + ret
+    if padto > 0:
+        if len(ret) < padto:
+            ret = [2] * (padto - len(ret)) + ret
+        elif len(ret) > padto:
+            raise Exception("Sequence is longer than expected. {} > {}. n={}".format(len(ret), padto, n))
 
     return ret

@@ -43,6 +43,7 @@ from spinn.data.snli import load_snli_data
 from spinn.util.data import SimpleProgressBar
 from spinn.util.blocks import the_gpu, to_gpu, l2_cost, flatten, debug_gradient
 from spinn.util.misc import Accumulator, time_per_token, MetricsLogger, EvalReporter
+from spinn.util.misc import complete_tree
 from spinn.util.misc import recursively_set_device
 import spinn.util.evalb as evalb
 
@@ -66,6 +67,14 @@ FLAGS = gflags.FLAGS
 
 def sequential_only():
     return FLAGS.model_type == "RNN" or FLAGS.model_type == "CBOW"
+
+
+def get_batch(X_batch, transitions_batch, y_batch, num_transitions_batch):
+    # Truncate data.
+    X_batch, transitions_batch = truncate(
+        X_batch, transitions_batch, num_transitions_batch)
+
+    return X_batch, transitions_batch, y_batch, num_transitions_batch
 
 
 def truncate(X_batch, transitions_batch, num_transitions_batch):
@@ -109,9 +118,8 @@ def evaluate(model, eval_set, logger, metrics_logger, step, vocabulary=None):
     transition_examples = []
 
     for i, (eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch, eval_ids) in enumerate(dataset):
-        if FLAGS.truncate_eval_batch:
-            eval_X_batch, eval_transitions_batch = truncate(
-                eval_X_batch, eval_transitions_batch, eval_num_transitions_batch)
+        eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch = get_batch(
+            eval_X_batch, eval_transitions_batch, eval_y_batch, eval_num_transitions_batch)
 
         # Run model.
         output = model(eval_X_batch, eval_transitions_batch, eval_y_batch,
@@ -295,7 +303,8 @@ def run(only_forward=False):
         raw_training_data, vocabulary, FLAGS.seq_length, data_manager, eval_mode=False, logger=logger,
         sentence_pair_data=data_manager.SENTENCE_PAIR_DATA,
         for_rnn=sequential_only(),
-        use_left_padding=FLAGS.use_left_padding)
+        use_left_padding=FLAGS.use_left_padding,
+        complete_tree=FLAGS.complete_tree)
     training_data_iter = util.MakeTrainingIterator(
         training_data, FLAGS.batch_size, FLAGS.smart_batching, FLAGS.use_peano,
         sentence_pair_data=data_manager.SENTENCE_PAIR_DATA)
@@ -310,7 +319,8 @@ def run(only_forward=False):
             data_manager, eval_mode=True, logger=logger,
             sentence_pair_data=data_manager.SENTENCE_PAIR_DATA,
             for_rnn=sequential_only(),
-            use_left_padding=FLAGS.use_left_padding)
+            use_left_padding=FLAGS.use_left_padding,
+            complete_tree=FLAGS.complete_tree)
         eval_it = util.MakeEvalIterator(eval_data,
             FLAGS.batch_size, FLAGS.eval_data_limit, bucket_eval=FLAGS.bucket_eval,
             shuffle=FLAGS.shuffle_eval, rseed=FLAGS.shuffle_eval_seed)
@@ -450,9 +460,8 @@ def run(only_forward=False):
 
             X_batch, transitions_batch, y_batch, num_transitions_batch, train_ids = training_data_iter.next()
 
-            if FLAGS.truncate_train_batch:
-                X_batch, transitions_batch = truncate(
-                    X_batch, transitions_batch, num_transitions_batch)
+            X_batch, transitions_batch, y_batch, num_transitions_batch = get_batch(
+                X_batch, transitions_batch, y_batch, num_transitions_batch)
 
             total_tokens = num_transitions_batch.ravel().sum()
 
@@ -751,8 +760,6 @@ if __name__ == '__main__':
         "when to save the early stopping 'best' checkpoints.")
     gflags.DEFINE_integer("seq_length", 30, "")
     gflags.DEFINE_integer("eval_seq_length", None, "")
-    gflags.DEFINE_boolean("truncate_eval_batch", True, "Shorten batches to max transition length.")
-    gflags.DEFINE_boolean("truncate_train_batch", True, "Shorten batches to max transition length.")
     gflags.DEFINE_boolean("smart_batching", True, "Organize batches using sequence length.")
     gflags.DEFINE_boolean("use_peano", True, "A mind-blowing sorting key.")
     gflags.DEFINE_integer("eval_data_limit", -1, "Truncate evaluation set. -1 indicates no truncation.")
@@ -765,6 +772,7 @@ if __name__ == '__main__':
     # Data preprocessing settings.
     gflags.DEFINE_boolean("use_skips", False, "Pad transitions with SKIP actions.")
     gflags.DEFINE_boolean("use_left_padding", True, "Pad transitions only on the LHS.")
+    gflags.DEFINE_boolean("complete_tree", False, "Use complete trees with n leaves.")
 
     # Model architecture settings.
     gflags.DEFINE_enum("model_type", "RNN", ["CBOW", "RNN", "SPINN", "RLSPINN", "RAESPINN", "GENSPINN"], "")
