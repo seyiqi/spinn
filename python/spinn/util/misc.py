@@ -31,6 +31,30 @@ def time_per_token(num_tokens, total_time):
     return sum(total_time) / float(sum(num_tokens))
 
 
+def is_valid(ts, n):
+    buf_len = n
+    stack_len = 0
+
+    for t in ts:
+        if t == 0:
+            buf_len -= 1
+            stack_len += 1
+        elif t == 1:
+            stack_len -= 1
+        if buf_len < 0 or stack_len < 0:
+            return False
+    if buf_len == 0 and stack_len == 1:
+        return True
+    return False
+
+
+def get_avg(A, key, default=0.0, clear=True):
+    ret = A.get(key, clear)
+    if len(ret) == 0:
+        return default
+    return np.array(ret).mean()
+
+
 class Accumulator(object):
     """Accumulator. Makes it easy to keep a trailing list of statistics."""
 
@@ -49,9 +73,6 @@ class Accumulator(object):
             except:
                 pass
         return ret
-
-    def get_avg(self, key, clear=True):
-        return np.array(self.get(key, clear)).mean()
 
 
 class MetricsLogger(object):

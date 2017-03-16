@@ -222,7 +222,7 @@ class SPINN(nn.Module):
         else:
             raise NotImplementedError
 
-        batch_size = t_mask.max()
+        batch_size = t_mask.max() + 1
         preds = []
         for batch_idx in range(batch_size):
             preds.append(source[t_mask == batch_idx])

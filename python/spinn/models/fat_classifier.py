@@ -42,8 +42,8 @@ from spinn.data.sst import load_sst_data, load_sst_binary_data
 from spinn.data.snli import load_snli_data
 from spinn.util.data import SimpleProgressBar
 from spinn.util.blocks import the_gpu, to_gpu, l2_cost, flatten, debug_gradient
-from spinn.util.misc import Accumulator, time_per_token, MetricsLogger, EvalReporter
-from spinn.util.misc import complete_tree
+from spinn.util.misc import Accumulator, get_avg, time_per_token, MetricsLogger, EvalReporter
+from spinn.util.misc import complete_tree, is_valid
 from spinn.util.misc import recursively_set_device
 import spinn.util.evalb as evalb
 
@@ -106,6 +106,8 @@ def evaluate(model, eval_set, logger, metrics_logger, step, vocabulary=None):
     class_correct = 0
     class_total = 0
     total_batches = len(dataset)
+    valid_correct = 0
+    valid_total = 0
     progress_bar = SimpleProgressBar(msg="Run Eval", bar_length=60, enabled=FLAGS.show_progress_bar)
     progress_bar.step(0, total=total_batches)
     total_tokens = 0
@@ -146,13 +148,26 @@ def evaluate(model, eval_set, logger, metrics_logger, step, vocabulary=None):
             transition_preds.append([m["t_preds"] for m in model.spinn.memories])
             transition_targets.append([m["t_given"] for m in model.spinn.memories])
 
-        if FLAGS.evalb or FLAGS.num_samples > 0:
-            transitions_per_example = model.spinn.get_transitions_per_example()
+        transitions_per_example = None
+
+        # Check if predictions are valid.
+        if not FLAGS.validate_transitions:
+            transitions_per_example = model.spinn.get_transitions_per_example() if transitions_per_example is None else transitions_per_example
+            if len(eval_num_transitions_batch.shape) == 2:
+                check = np.concatenate([eval_num_transitions_batch[:,0], eval_num_transitions_batch[:,1]], 0)
+            else:
+                check = eval_num_transitions_batch
+            valid_correct += sum([is_valid(ts, (n+1)/2) for n, ts in zip(check, transitions_per_example)])
+            valid_total += check.shape[0]
+
+        if FLAGS.evalb:
+            transitions_per_example = model.spinn.get_transitions_per_example() if transitions_per_example is None else transitions_per_example
             if model.use_sentence_pair:
                 eval_transitions_batch = np.concatenate([
                     eval_transitions_batch[:,:,0], eval_transitions_batch[:,:,1]], axis=0)
 
         if FLAGS.num_samples > 0 and len(transition_examples) < FLAGS.num_samples and i % (step % 11 + 1) == 0:
+            transitions_per_example = model.spinn.get_transitions_per_example() if transitions_per_example is None else transitions_per_example
             r = random.randint(0, len(transitions_per_example) - 1)
             transition_examples.append((transitions_per_example[r], eval_transitions_batch[r]))
 
@@ -196,6 +211,9 @@ def evaluate(model, eval_set, logger, metrics_logger, step, vocabulary=None):
 
     # Extra Component.
     stats_str += "\nEval Extra:"
+
+    if not FLAGS.validate_transitions:
+        stats_str += " val={:.5f}".format(valid_correct / float(valid_total))
 
     if len(transition_examples) > 0:
         for t_idx in range(len(transition_examples)):
@@ -608,6 +626,17 @@ def run(only_forward=False):
             # Gradient descent step.
             optimizer.step()
 
+            # Check if predictions are valid.
+            if not FLAGS.validate_transitions:
+                transitions_per_example = model.spinn.get_transitions_per_example()
+                if len(num_transitions_batch.shape) == 2:
+                    check = np.concatenate([num_transitions_batch[:,0], num_transitions_batch[:,1]], 0)
+                else:
+                    check = num_transitions_batch
+                valid_rate = sum([is_valid(ts, (n+1)/2) for n, ts in zip(check, transitions_per_example)])
+                valid_rate = valid_rate / float(check.shape[0])
+                A.add('valid_rate', valid_rate)
+
             end = time.time()
 
             total_time = end - start
@@ -618,25 +647,12 @@ def run(only_forward=False):
             if step % FLAGS.statistics_interval_steps == 0:
                 progress_bar.step(i=FLAGS.statistics_interval_steps, total=FLAGS.statistics_interval_steps)
                 progress_bar.finish()
-                avg_class_acc = A.get_avg('class_acc')
                 if transition_loss is not None:
                     all_preds = np.array(flatten(A.get('preds')))
                     all_truth = np.array(flatten(A.get('truth')))
                     avg_trans_acc = (all_preds == all_truth).sum() / float(all_truth.shape[0])
                 else:
                     avg_trans_acc = 0.0
-                if leaf_loss is not None:
-                    avg_leaf_acc = A.get_avg('leaf_acc')
-                else:
-                    avg_leaf_acc = 0.0
-                if gen_loss is not None:
-                    avg_gen_acc = A.get_avg('gen_acc')
-                else:
-                    avg_gen_acc = 0.0
-                if hasattr(model, 'avg_entropy'):
-                    avg_entropy = A.get_avg('entropy')
-                else:
-                    avg_entropy = 0.0
                 if hasattr(model, "spinn") and hasattr(model.spinn, "epsilon"):
                     epsilon = model.spinn.epsilon
                 else:
@@ -644,20 +660,21 @@ def run(only_forward=False):
                 time_metric = time_per_token(A.get('total_tokens'), A.get('total_time'))
                 stats_args = {
                     "step": step,
-                    "class_acc": avg_class_acc,
+                    "class_acc": get_avg(A, 'class_acc'),
                     "transition_acc": avg_trans_acc,
                     "total_cost": total_cost_val,
                     "xent_cost": xent_cost_val,
                     "transition_cost": transition_cost_val,
                     "l2_cost": l2_cost_val,
+                    "valid_rate": get_avg(A, 'valid_rate', 0.0),
                     "policy_cost": policy_cost_val,
                     "value_cost": value_cost_val,
                     "epsilon": epsilon,
-                    "avg_entropy": avg_entropy,
+                    "avg_entropy": get_avg(A, 'entropy', 0.0),
                     "rae_cost": rae_cost_val,
-                    "leaf_acc": avg_leaf_acc,
+                    "leaf_acc": get_avg(A, 'leaf_acc', 0.0),
                     "leaf_cost": leaf_cost_val,
-                    "gen_acc": avg_gen_acc,
+                    "gen_acc": get_avg(A, 'gen_acc', 0.0),
                     "gen_cost": gen_cost_val,
                     "learning_rate": optimizer.lr,
                     "time": time_metric,
@@ -694,6 +711,8 @@ def run(only_forward=False):
                 stats_str += " lr={learning_rate:.7f}"
                 if hasattr(model, "spinn") and hasattr(model.spinn, "epsilon"):
                     stats_str += " eps={epsilon:.7f}"
+                if not FLAGS.validate_transitions:
+                    stats_str += " val={valid_rate:.5f}"
 
                 if FLAGS.num_samples > 0:
                     transitions_per_example = model.spinn.get_transitions_per_example()
@@ -726,7 +745,7 @@ def run(only_forward=False):
             if step % FLAGS.metrics_interval_steps == 0:
                 m_keys = M.cache.keys()
                 for k in m_keys:
-                    metrics_logger.Log(k, M.get_avg(k), step)
+                    metrics_logger.Log(k, get_avg(M, k, 0.0), step)
 
             progress_bar.step(i=step % FLAGS.statistics_interval_steps, total=FLAGS.statistics_interval_steps)
 
