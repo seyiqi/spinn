@@ -720,7 +720,7 @@ class BaseModel(nn.Module):
 
         return example
 
-    def wrap_sentence_pair(self, h_list):
+    def wrap_sentence_pair(self, h_list, select):
         batch_size = len(h_list) / 2
         h_premise = select(torch.cat(h_list[:batch_size], 0), self.hidden_dim)
         h_hypothesis = select(torch.cat(h_list[batch_size:], 0), self.hidden_dim)
