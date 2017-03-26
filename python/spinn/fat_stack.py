@@ -33,6 +33,7 @@ def build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS
          embedding_keep_rate=FLAGS.embedding_keep_rate,
          tracking_lstm_hidden_dim=FLAGS.tracking_lstm_hidden_dim,
          transition_weight=FLAGS.transition_weight,
+         use_attention=FLAGS.use_attention,
          encode_style=FLAGS.encode_style,
          encode_reverse=FLAGS.encode_reverse,
          encode_bidirectional=FLAGS.encode_bidirectional,
@@ -476,6 +477,7 @@ class BaseModel(nn.Module):
                  embedding_keep_rate=None,
                  tracking_lstm_hidden_dim=4,
                  transition_weight=None,
+                 use_attention=None,
                  encode_style=None,
                  encode_reverse=None,
                  encode_bidirectional=None,
@@ -534,6 +536,10 @@ class BaseModel(nn.Module):
         # Create dynamic embedding layer.
         self.embed = Embed(input_dim, vocab.size, vectors=vocab.vectors, use_projection=use_projection)
 
+        if use_attention:
+            self.attention_th = Linear()(hidden_dim, 1, bias=True)
+            self.attention_h = Linear()(hidden_dim, 1, bias=False)
+
         # Optionally build input encoder.
         if encode_style is not None:
             self.encode = self.build_input_encoder(encode_style=encode_style,
@@ -581,14 +587,39 @@ class BaseModel(nn.Module):
         h_list, transition_acc, transition_loss = self.spinn(example,
                                use_internal_parser=use_internal_parser,
                                validate_transitions=validate_transitions)
-        h = self.wrap(h_list)
-        return h, transition_acc, transition_loss
+        return h_list, transition_acc, transition_loss
+
+    def run_attention(self, h_list):
+        eligible = [m['top_stack_1'].h for m in self.spinn.memories if 'top_stack_1' in m]
+        seq_length = len(eligible)
+        batch_size, dim = eligible[0].size()
+
+        # NOTE: Might be worth double checking dims here...
+        tree_h = torch.cat(eligible, 1).view(-1, dim)
+        h = get_h(torch.cat(h_list, 0), self.hidden_dim)
+
+        attn_tree_h = self.attention_th(tree_h)
+        attn_h = self.attention_h(h)
+
+        tree_h_list = torch.chunk(tree_h, batch_size, 0)
+        attn_tree_h_list = torch.chunk(attn_tree_h, batch_size, 0)
+        attn_h_list = torch.chunk(attn_h, batch_size, 0)
+
+        e = []
+        for ath, ah, th in zip(attn_tree_h_list, attn_h_list, tree_h_list):
+            ath_t = ath.t()
+            th_t = th.t()
+            scale = F.softmax(ath_t + ah.expand_as(ath_t))
+            new_h = (th_t * scale.expand_as(th_t)).t().sum(0)
+            e.append(new_h)
+
+        return e
 
     def output_hook(self, output, sentences, transitions, y_batch=None, embeds=None):
         pass
 
-    def forward(self, sentences, transitions, y_batch=None,
-                 use_internal_parser=False, validate_transitions=True):
+    def forward(self, sentences, transitions, y_batch=None, use_internal_parser=False,
+                validate_transitions=True, use_attention=False):
         example = self.unwrap(sentences, transitions)
 
         b, l = example.tokens.size()[:2]
@@ -608,7 +639,15 @@ class BaseModel(nn.Module):
 
         example.bufs = buffers
 
-        h, transition_acc, transition_loss = self.run_spinn(example, use_internal_parser, validate_transitions)
+        h_list, transition_acc, transition_loss = self.run_spinn(example, use_internal_parser, validate_transitions)
+
+        if use_attention:
+            h_list = self.run_attention(h_list)
+            select = lambda x, _: x
+        else:
+            select = get_h
+
+        h = self.wrap(h_list, select)
 
         self.spinn_outp = h
 
@@ -631,10 +670,10 @@ class BaseModel(nn.Module):
             return self.unwrap_sentence_pair(sentences, transitions)
         return self.unwrap_sentence(sentences, transitions)
 
-    def wrap(self, h_list):
+    def wrap(self, h_list, select):
         if self.use_sentence_pair:
-            return self.wrap_sentence_pair(h_list)
-        return self.wrap_sentence(h_list)
+            return self.wrap_sentence_pair(h_list, select)
+        return self.wrap_sentence(h_list, select)
 
     # --- Sentence Model Specific ---
 
@@ -653,9 +692,9 @@ class BaseModel(nn.Module):
 
         return example
 
-    def wrap_sentence(self, h_list):
+    def wrap_sentence(self, h_list, select):
         batch_size = len(h_list) / 2
-        h = get_h(torch.cat(h_list, 0), self.hidden_dim)
+        h = select(torch.cat(h_list, 0), self.hidden_dim)
         return [h]
 
     # --- Sentence Pair Model Specific ---
@@ -681,6 +720,6 @@ class BaseModel(nn.Module):
 
     def wrap_sentence_pair(self, h_list):
         batch_size = len(h_list) / 2
-        h_premise = get_h(torch.cat(h_list[:batch_size], 0), self.hidden_dim)
-        h_hypothesis = get_h(torch.cat(h_list[batch_size:], 0), self.hidden_dim)
+        h_premise = select(torch.cat(h_list[:batch_size], 0), self.hidden_dim)
+        h_hypothesis = select(torch.cat(h_list[batch_size:], 0), self.hidden_dim)
         return [h_premise, h_hypothesis]

@@ -308,6 +308,9 @@ def get_flags():
         "Use cell output as feature for transition net.")
     gflags.DEFINE_boolean("use_lengths", False, "The transition net will be biased.")
 
+    # Attention settings.
+    gflags.DEFINE_boolean("use_attention", False, "Attend over tree states.")
+
     # Encode settings.
     gflags.DEFINE_boolean("use_encode", False, "Encode embeddings with sequential network.")
     gflags.DEFINE_enum("encode_style", None, ["LSTM", "CNN", "QRNN"], "Encode embeddings with sequential context.")
@@ -455,7 +458,8 @@ def main_loop(FLAGS, model, optimizer, trainer, training_data_iter, eval_iterato
     X_batch, transitions_batch, y_batch, num_transitions_batch, structure_transitions, train_ids = get_batch(training_data_iter.next())
     model(X_batch, transitions_batch, y_batch,
             use_internal_parser=FLAGS.use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions
+            validate_transitions=FLAGS.validate_transitions,
+            use_attention=FLAGS.use_attention
             )
 
     logger.Log("")
@@ -502,7 +506,8 @@ def main_loop(FLAGS, model, optimizer, trainer, training_data_iter, eval_iterato
         # Run model.
         output = model(X_batch, transitions_batch, y_batch,
             use_internal_parser=FLAGS.use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions
+            validate_transitions=FLAGS.validate_transitions,
+            use_attention=FLAGS.use_attention
             )
 
         # Normalize output.
