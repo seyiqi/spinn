@@ -595,8 +595,8 @@ class BaseModel(nn.Module):
         batch_size, dim = eligible[0].size()
 
         # NOTE: Might be worth double checking dims here...
-        tree_h = torch.cat(eligible, 1).view(-1, dim)
         h = get_h(torch.cat(h_list, 0), self.hidden_dim)
+        tree_h = torch.cat(eligible + [h], 1).view(-1, dim)
 
         attn_tree_h = self.attention_th(tree_h)
         attn_h = self.attention_h(h)
@@ -605,10 +605,12 @@ class BaseModel(nn.Module):
         attn_tree_h_list = torch.chunk(attn_tree_h, batch_size, 0)
         attn_h_list = torch.chunk(attn_h, batch_size, 0)
 
+        # TODO: Only calculate on the non-padded tokens.
         e = []
-        for ath, ah, th in zip(attn_tree_h_list, attn_h_list, tree_h_list):
-            ath_t = ath.t()
-            th_t = th.t()
+        for ath, ah, th, n_tkns in zip(attn_tree_h_list, attn_h_list, tree_h_list, self.spinn.buffers_n):
+            n_states = n_tkns * 2 - 1
+            ath_t = ath.t()[:,-n_states:]
+            th_t = th.t()[:,-n_states:]
             scale = F.softmax(ath_t + ah.expand_as(ath_t))
             new_h = (th_t * scale.expand_as(th_t)).t().sum(0)
             e.append(new_h)
