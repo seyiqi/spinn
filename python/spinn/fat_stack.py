@@ -21,7 +21,7 @@ from spinn.util.blocks import HeKaimingInitializer
 from spinn.data import T_SHIFT, T_REDUCE, T_SKIP, T_STRUCT
 
 
-def build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS):
+def build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS, model_specific_params):
     model_cls = BaseModel
     use_sentence_pair = data_manager.SENTENCE_PAIR_DATA
 

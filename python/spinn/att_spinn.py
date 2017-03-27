@@ -15,6 +15,36 @@ import math
 import logging
 
 
+
+def build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS, model_specific_params):
+    model_cls = BaseModel
+    use_sentence_pair = data_manager.SENTENCE_PAIR_DATA
+
+    return model_cls(model_dim=FLAGS.model_dim,
+         word_embedding_dim=FLAGS.word_embedding_dim,
+         vocab_size=vocab_size,
+         initial_embeddings=initial_embeddings,
+         num_classes=num_classes,
+         mlp_dim=FLAGS.mlp_dim,
+         embedding_keep_rate=FLAGS.embedding_keep_rate,
+         classifier_keep_rate=FLAGS.semantic_classifier_keep_rate,
+         tracking_lstm_hidden_dim=FLAGS.tracking_lstm_hidden_dim,
+         transition_weight=FLAGS.transition_weight,
+         use_encode=FLAGS.use_encode,
+         encode_reverse=FLAGS.encode_reverse,
+         encode_bidirectional=FLAGS.encode_bidirectional,
+         encode_num_layers=FLAGS.encode_num_layers,
+         lateral_tracking=FLAGS.lateral_tracking,
+         use_tracking_in_composition=FLAGS.use_tracking_in_composition,
+         use_sentence_pair=use_sentence_pair,
+         use_difference_feature=FLAGS.use_difference_feature,
+         use_product_feature=FLAGS.use_product_feature,
+         num_mlp_layers=FLAGS.num_mlp_layers,
+         mlp_bn=FLAGS.mlp_bn,
+         model_specific_params=model_specific_params, # TODO: This could be a nested arg parser.
+        )
+
+
 class SPINNAttExt(SPINN):
 
     def __init__(self, args, vocab):
@@ -249,7 +279,6 @@ class BaseModel(nn.Module):
                  encode_reverse=None,
                  encode_bidirectional=None,
                  encode_num_layers=None,
-                 use_skips=False,
                  lateral_tracking=None,
                  use_tracking_in_composition=None,
                  use_sentence_pair=False,

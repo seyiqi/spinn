@@ -27,6 +27,7 @@ import spinn.util.evalb as evalb
 
 import spinn.gen_spinn
 import spinn.rae_spinn
+import spinn.att_spinn
 import spinn.rl_spinn
 import spinn.fat_stack
 import spinn.plain_rnn
@@ -283,7 +284,7 @@ def get_flags():
         "If set, load GloVe-formatted embeddings from here.")
 
     # Model architecture settings.
-    gflags.DEFINE_enum("model_type", "RNN", ["CBOW", "RNN", "SPINN", "RLSPINN", "RAESPINN", "GENSPINN"], "")
+    gflags.DEFINE_enum("model_type", "RNN", ["CBOW", "RNN", "SPINN", "RLSPINN", "RAESPINN", "GENSPINN", "ATTSPINN"], "")
     gflags.DEFINE_integer("gpu", -1, "")
     gflags.DEFINE_integer("model_dim", 8, "")
     gflags.DEFINE_integer("word_embedding_dim", 8, "")
@@ -327,6 +328,10 @@ def get_flags():
     gflags.DEFINE_float("rl_entropy_beta", 0.001, "Entropy regularization on transition policy.")
     gflags.DEFINE_float("rl_epsilon", 1.0, "Percent of sampled actions during train time.")
     gflags.DEFINE_float("rl_epsilon_decay", 50000, "Percent of sampled actions during train time.")
+
+    # Attention model settings
+    gflags.DEFINE_boolean("using_diff_in_mlstm", False, "use (ak - hk) as a feature, ak is attention vector, hk is the vector of hypothesis in step k")
+    gflags.DEFINE_boolean("using_prod_in_mlstm", False, "use (ak * hk) as a feature, ak is attention vector, hk is the vector of hypothesis in step k")
 
     # RAE settings.
     gflags.DEFINE_boolean("predict_leaf", True, "Predict whether a node is a leaf or not.")
@@ -405,6 +410,7 @@ def flag_defaults(FLAGS):
 def init_model(FLAGS, logger, initial_embeddings, vocab_size, num_classes, data_manager):
     # Choose model.
     logger.Log("Building model.")
+    model_specific_params = {}
     if FLAGS.model_type == "CBOW":
         build_model = spinn.cbow.build_model
     elif FLAGS.model_type == "RNN":
@@ -413,6 +419,10 @@ def init_model(FLAGS, logger, initial_embeddings, vocab_size, num_classes, data_
         build_model = spinn.fat_stack.build_model
     elif FLAGS.model_type == "RLSPINN":
         build_model = spinn.rl_spinn.build_model
+    elif FLAGS.model_type == "ATTSPINN":
+        build_model = spinn.att_spinn.build_model
+        model_specific_params['using_diff_in_mlstm'] = FLAGS.using_diff_in_mlstm
+        model_specific_params['using_prod_in_mlstm'] = FLAGS.using_prod_in_mlstm
     elif FLAGS.model_type == "RAESPINN":
         build_model = spinn.rae_spinn.build_model
     elif FLAGS.model_type == "GENSPINN":
@@ -420,7 +430,7 @@ def init_model(FLAGS, logger, initial_embeddings, vocab_size, num_classes, data_
     else:
         raise Exception("Requested unimplemented model type %s" % FLAGS.model_type)
 
-    model = build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS)
+    model = build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS, model_specific_params)
 
     # Build optimizer.
     if FLAGS.optimizer_type == "Adam":
