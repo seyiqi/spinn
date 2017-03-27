@@ -95,8 +95,7 @@ def evaluate(model, eval_set, logger, step, vocabulary=None):
         # Run model.
         output = model(eval_X_batch, eval_transitions_batch, eval_y_batch,
             use_internal_parser=FLAGS.use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions,
-            use_attention=FLAGS.use_attention)
+            validate_transitions=FLAGS.validate_transitions)
 
         # Normalize output.
         logits = F.log_softmax(output)
@@ -401,8 +400,7 @@ def run(only_forward=False):
         X_batch, transitions_batch, y_batch, num_transitions_batch = get_batch(training_data_iter.next())[:4]
         model(X_batch, transitions_batch, y_batch,
                 use_internal_parser=FLAGS.use_internal_parser,
-                validate_transitions=FLAGS.validate_transitions,
-                use_attention=FLAGS.use_attention
+                validate_transitions=FLAGS.validate_transitions
                 )
 
         train_str = train_format(model)
@@ -436,8 +434,7 @@ def run(only_forward=False):
             # Run model.
             output = model(X_batch, transitions_batch, y_batch,
                 use_internal_parser=FLAGS.use_internal_parser,
-                validate_transitions=FLAGS.validate_transitions,
-                use_attention=FLAGS.use_attention
+                validate_transitions=FLAGS.validate_transitions
                 )
 
             # Normalize output.
@@ -599,6 +596,7 @@ if __name__ == '__main__':
 
     # Attention settings.
     gflags.DEFINE_boolean("use_attention", False, "Attend over tree states.")
+    gflags.DEFINE_integer("attention_dim", 128, "Attend over tree states.")
 
     # Encode settings.
     gflags.DEFINE_boolean("use_encode", False, "Encode embeddings with sequential network.")

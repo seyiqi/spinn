@@ -309,7 +309,8 @@ def get_flags():
     gflags.DEFINE_boolean("use_lengths", False, "The transition net will be biased.")
 
     # Attention settings.
-    gflags.DEFINE_boolean("use_attention", False, "Attend over tree states.")
+    gflags.DEFINE_boolean("use_attention", False, "Attend over hidden states.")
+    gflags.DEFINE_integer("attention_dim", 128, "Size for output of attention networks.")
 
     # Encode settings.
     gflags.DEFINE_boolean("use_encode", False, "Encode embeddings with sequential network.")
@@ -458,8 +459,7 @@ def main_loop(FLAGS, model, optimizer, trainer, training_data_iter, eval_iterato
     X_batch, transitions_batch, y_batch, num_transitions_batch, structure_transitions, train_ids = get_batch(training_data_iter.next())
     model(X_batch, transitions_batch, y_batch,
             use_internal_parser=FLAGS.use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions,
-            use_attention=FLAGS.use_attention
+            validate_transitions=FLAGS.validate_transitions
             )
 
     logger.Log("")
@@ -506,8 +506,7 @@ def main_loop(FLAGS, model, optimizer, trainer, training_data_iter, eval_iterato
         # Run model.
         output = model(X_batch, transitions_batch, y_batch,
             use_internal_parser=FLAGS.use_internal_parser,
-            validate_transitions=FLAGS.validate_transitions,
-            use_attention=FLAGS.use_attention
+            validate_transitions=FLAGS.validate_transitions
             )
 
         # Normalize output.
