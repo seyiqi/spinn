@@ -9,45 +9,17 @@ from spinn.util.misc import Args, Vocab, Example
 from spinn.util.blocks import to_cpu, to_gpu, get_h
 from spinn.util.blocks import Embed, MLP
 from fat_stack import SPINN
+from spinn.fat_stack import BaseModel as _BaseModel
 from itertools import izip
 import math
 import logging
 
-class SentencePairTrainer():
-    """
-    required by the framework, fat_classifier.py @291,295
-    init as classifier_trainer at fat_classifier.py @337
-    """
-    def __init__(self, model, optimizer):
-        print 'attspinn trainer init'
-        self.model = model
-        self.optimizer = optimizer
-
-    def save(self, filename, step, best_dev_error):
-        torch.save({
-            'step': step,
-            'best_dev_error': best_dev_error,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-        }, filename)
-
-    def load(self, filename):
-        checkpoint = torch.load(filename)
-        model_state_dict = checkpoint['model_state_dict']
-
-        # HACK: Compatability for saving supervised SPINN and loading RL SPINN.
-        if 'baseline' in self.model.state_dict().keys() and 'baseline' not in model_state_dict:
-            model_state_dict['baseline'] = torch.FloatTensor([0.0])
-
-        self.model.load_state_dict(model_state_dict)
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        return checkpoint['step'], checkpoint['best_dev_error']
 
 class SPINNAttExt(SPINN):
 
-    def __init__(self, args, vocab, use_skips):
+    def __init__(self, args, vocab):
         print 'SPINNAttExt init...'
-        super(SPINNAttExt, self).__init__(args, vocab, use_skips)
+        super(SPINNAttExt, self).__init__(args, vocab)
         self.hidden_dim = args.size
         self.states = [] # only support one example now, premise and hypothesis
         self.debug = False
@@ -259,7 +231,9 @@ class AttentionModel(nn.Module):
         return hmk_final
 
 
-class SentencePairModel(nn.Module):
+class BaseModel(nn.Module):
+
+    optimize_transition_loss = True
 
     def __init__(self, model_dim=None,
                  word_embedding_dim=None,
@@ -278,7 +252,7 @@ class SentencePairModel(nn.Module):
                  use_skips=False,
                  lateral_tracking=None,
                  use_tracking_in_composition=None,
-                 # use_sentence_pair=False,
+                 use_sentence_pair=False,
                  use_difference_feature=False,
                  use_product_feature=False,
                  num_mlp_layers=None,
@@ -286,9 +260,13 @@ class SentencePairModel(nn.Module):
                  model_specific_params={},
                  **kwargs
                 ):
-        super(SentencePairModel, self).__init__()
+        super(BaseModel, self).__init__()
         print 'ATTSPINN SentencePairModel init...'
-        # self.use_sentence_pair = use_sentence_pair
+
+        self.use_sentence_pair = use_sentence_pair
+        if not use_sentence_pair:
+            raise NotImplementedError
+
         self.use_difference_feature = use_difference_feature
         self.use_product_feature = use_product_feature
 
@@ -340,15 +318,15 @@ class SentencePairModel(nn.Module):
                 bidirectional=self.encode_bidirectional,
                 dropout=self.embedding_dropout_rate)
 
-        self.spinn = self.build_spinn(args, vocab, use_skips)
+        self.spinn = self.build_spinn(args, vocab)
 
         self.attention = self.build_attention(args)
 
         self.mlp = MLP(mlp_input_dim, mlp_dim, num_classes,
             num_mlp_layers, mlp_bn, classifier_dropout_rate)
 
-    def build_spinn(self, args, vocab, use_skips):
-        return SPINNAttExt(args, vocab, use_skips=use_skips)
+    def build_spinn(self, args, vocab):
+        return SPINNAttExt(args, vocab)
 
     def build_attention(self, args):
         return AttentionModel(args)
@@ -442,16 +420,3 @@ class SentencePairModel(nn.Module):
             features.append(h_ks * h_m)
         features = torch.cat(features, 1) # D0 -> batch, D1 -> representation vector
         return features
-
-
-
-class SentenceModel(nn.Module):
-    """
-    required by the framework, fat_classifier.py@296
-    init as model at fat_classifier.py@300
-    because attention model take two sentences, this model might never be used
-    """
-    def __init__(self):
-        raise Exception("")
-
-

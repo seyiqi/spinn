@@ -120,7 +120,7 @@ class Tracker(nn.Module):
 
 class SPINN(nn.Module):
 
-    def __init__(self, args, vocab, predict_use_cell, use_lengths):
+    def __init__(self, args, vocab, predict_use_cell=True, use_lengths=False):
         super(SPINN, self).__init__()
 
         # Optional debug mode.
@@ -275,6 +275,7 @@ class SPINN(nn.Module):
             for stack in stacks:
                 new_stack_item = next(shift_candidates)
                 stack.append(new_stack_item)
+
     def shift_phase_hook(self, tops, trackings, stacks, idxs):
         pass
 
@@ -286,7 +287,7 @@ class SPINN(nn.Module):
                 new_stack_item = next(reduced)
                 stack.append(new_stack_item)
 
-    def reduce_phase_hook(self, lefts, rights, trackings, reduce_stacks):
+    def reduce_phase_hook(self, lefts, rights, trackings, reduce_stacks, idxs):
         pass
 
     def loss_phase_hook(self):
@@ -423,7 +424,7 @@ class SPINN(nn.Module):
             self.shift_phase(s_tops, s_trackings, s_stacks, s_idxs)
             self.shift_phase_hook(s_tops, s_trackings, s_stacks, s_idxs)
             self.reduce_phase(r_lefts, r_rights, r_trackings, r_stacks)
-            self.reduce_phase_hook(r_lefts, r_rights, r_trackings, r_stacks, r_idxs=r_idxs)
+            self.reduce_phase_hook(r_lefts, r_rights, r_trackings, r_stacks, r_idxs)
 
             # Memory Phase
             # ============
