@@ -46,6 +46,7 @@ def build_model(data_manager, initial_embeddings, vocab_size, num_classes, FLAGS
          mlp_bn=FLAGS.mlp_bn,
          encode=layers["input_encoder"],
          composition=layers["composition"],
+         seq_length=FLAGS.seq_length,
         )
 
 
@@ -223,14 +224,16 @@ class SPINN(nn.Module):
 
         t_preds = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
         t_preds = torch.from_numpy(t_preds).long()
-        t_logits = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0).data.cpu()
-        t_logits = torch.cat([t_logits, torch.zeros(t_logits.size(0), 1)], 1)
-        t_strength = torch.gather(t_logits, 1, t_preds.view(-1, 1))
+        t_outp = torch.cat([m['t_outp'] for m in self.memories if m.get('t_outp', None) is not None], 0).data.cpu()
+        t_outp = F.sigmoid(t_outp)
+        t_outp = torch.cat([1-t_outp, t_outp], 1)
+        t_outp = torch.cat([t_outp, torch.zeros(t_outp.size(0), 1)], 1)
+        t_strength = torch.gather(t_outp, 1, t_preds.view(-1, 1))
 
         _transitions = [m[source].reshape(1, -1) for m in self.memories if m.get(source, None) is not None]
         transitions = np.concatenate(_transitions).T
 
-        t_strength = torch.exp(t_strength.view(*list(reversed(transitions.shape))).t())
+        t_strength = t_strength.view(*list(reversed(transitions.shape))).t()
 
         skip_mask = (torch.from_numpy(transitions) == T_SKIP).byte()
         t_strength[skip_mask] = 0.
@@ -293,6 +296,12 @@ class SPINN(nn.Module):
         batch_size = inp_transitions.shape[0]
         invalid_count = np.zeros(batch_size)
 
+        tl = torch.from_numpy(inp_transitions).long()
+        tp = F.sigmoid(self.binary_preds).data.round().long()
+        tp[tl == 2] = 2
+
+        # import ipdb; ipdb.set_trace()
+
         # Transition Loop
         # ===============
 
@@ -301,17 +310,44 @@ class SPINN(nn.Module):
             transition_arr = list(transitions)
             sub_batch_size = len(transition_arr)
 
+            transition_preds = tp[:, t_step].numpy()
+            t_outp = self.binary_preds[:, t_step]
+
             # A mask based on SKIP transitions.
             cant_skip = np.array(transitions) != T_SKIP
             must_skip = np.array(transitions) == T_SKIP
+
+            validated_preds, invalid_mask = self.validate(transition_arr, transition_preds, self.stacks, self.bufs)
+            if validate_transitions:
+                transition_preds = validated_preds
+
+            # If this FLAG is set, then use the predicted actions rather than the given.
+            if use_internal_parser:
+                transition_arr = transition_preds.tolist()
 
             # Memories
             # ========
             # Keep track of key values to determine accuracy and loss.
             self.memory = {}
 
+            # Distribution of transitions use to calculate transition loss.
+            self.memory["t_outp"] = t_outp
+
+            # Given transitions.
+            self.memory["t_given"] = transitions
+
+            # Keep track of which predictions have been valid.
+            self.memory["t_valid_mask"] = np.logical_not(invalid_mask)
+            invalid_count += invalid_mask
+
+            # Actual transition predictions. Used to measure transition accuracy.
+            self.memory["t_preds"] = transition_preds
+
+            # Binary mask of examples that have a transition.
+            self.memory["t_mask"] = cant_skip
+
             # Prepare tracker input.
-            if self.debug and any(len(buf) < 1 or len(stack) for buf, stack in zip(self.bufs, self.stacks)):
+            if False and self.debug and any(len(buf) < 1 or len(stack) for buf, stack in zip(self.bufs, self.stacks)):
                 # To elaborate on this exception, when cropping examples it is possible
                 # that your first 1 or 2 actions is a reduce action. It is unclear if this
                 # is a bug in cropping or a bug in how we think about cropping. In the meantime,
@@ -328,7 +364,7 @@ class SPINN(nn.Module):
             # Run if:
             # A. We have a tracking component and,
             # B. There is at least one transition that will not be skipped.
-            if hasattr(self, 'tracker') and sum(cant_skip) > 0:
+            if False and hasattr(self, 'tracker') and sum(cant_skip) > 0:
 
                 # Get hidden output from the tracker. Used to predict transitions.
                 tracker_h, tracker_c = self.tracker(
@@ -428,11 +464,11 @@ class SPINN(nn.Module):
         # Loss Phase
         # ==========
 
-        if hasattr(self, 'tracker') and hasattr(self, 'transition_net'):
+        if True or (hasattr(self, 'tracker') and hasattr(self, 'transition_net')):
             t_preds = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
             t_given = np.concatenate([m['t_given'] for m in self.memories if m.get('t_given', None) is not None])
             t_mask = np.concatenate([m['t_mask'] for m in self.memories if m.get('t_mask', None) is not None])
-            t_logits = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0)
+            t_outp = torch.cat([m['t_outp'] for m in self.memories if m.get('t_outp', None) is not None], 0)
 
             # We compute accuracy and loss after all transitions have complete,
             # since examples can have different lengths when not using skips.
@@ -444,11 +480,14 @@ class SPINN(nn.Module):
             n_correct = (t_preds == t_given).sum() - n_skips
             transition_acc = n_correct / float(n_total)
 
+            #TODO: Which logits are being used?
+            # import ipdb; ipdb.set_trace()
+
             # Transition Loss.
             index = to_gpu(Variable(torch.from_numpy(np.arange(t_mask.shape[0])[t_mask])).long())
             select_t_given = to_gpu(Variable(torch.from_numpy(t_given[t_mask]), volatile=not self.training).long())
-            select_t_logits = torch.index_select(t_logits, 0, index)
-            transition_loss = nn.NLLLoss()(select_t_logits, select_t_given) * self.transition_weight
+            select_t_outp = torch.index_select(t_outp, 0, index)
+            transition_loss = nn.BCELoss()(F.sigmoid(select_t_outp.view(-1,1)), select_t_given.float().view(-1,1)) * self.transition_weight
 
             self.n_invalid = (invalid_count > 0).sum()
             self.invalid = self.n_invalid / float(batch_size)
@@ -493,9 +532,12 @@ class BaseModel(nn.Module):
                  classifier_keep_rate=None,
                  encode=None,
                  composition=None,
+                 seq_length=None,
                  **kwargs
                 ):
         super(BaseModel, self).__init__()
+
+        self.seq_length = seq_length
 
         self.use_sentence_pair = use_sentence_pair
         self.use_difference_feature = use_difference_feature
@@ -526,6 +568,8 @@ class BaseModel(nn.Module):
         features_dim = self.get_features_dim()
         self.mlp = MLP(features_dim, mlp_dim, num_classes,
             num_mlp_layers, mlp_bn, classifier_dropout_rate)
+
+        self.binary_net = nn.Conv2d(1, seq_length, (seq_length, model_dim))
 
         self.embedding_dropout_rate = 1. - embedding_keep_rate
 
@@ -568,7 +612,15 @@ class BaseModel(nn.Module):
         return h, transition_acc, transition_loss
 
     def forward_hook(self, embeds, batch_size, seq_length):
-        pass
+        x = embeds.view(batch_size, seq_length, -1)
+        actual = x.size(1)
+        wanted = self.seq_length - actual
+        if wanted > 0:
+            padding = Variable(torch.zeros(batch_size, wanted, x.size(2))) # TODO: Use expand.
+            new_x = torch.cat([padding, x], 1)
+        b = self.binary_net(new_x.unsqueeze(1))
+        preds = b.squeeze()
+        self.spinn.binary_preds = preds[:, wanted:]
 
     def output_hook(self, output, sentences, transitions, y_batch=None, embeds=None):
         pass
