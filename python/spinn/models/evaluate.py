@@ -45,7 +45,6 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
     filename, dataset = eval_set
 
     A = Accumulator()
-    M = MetricsWriter(os.path.join(FLAGS.metrics_path, FLAGS.experiment_name))
     reporter = EvalReporter()
 
     eval_str = eval_format(model)
@@ -87,7 +86,13 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
         total_tokens += sum([(nt+1)/2 for nt in eval_num_transitions_batch.reshape(-1)])
 
         if FLAGS.write_eval_report:
-            reporter_args = [pred, target, eval_ids, output.data.cpu().numpy()]
+            reporter_args = dict(
+                preds=pred,
+                target=target,
+                example_ids=eval_ids,
+                output=output.data.cpu().numpy()
+                )
+
             if hasattr(model, 'transition_loss'):
                 transitions_per_example, _ = model.spinn.get_transitions_per_example(
                     style="preds" if FLAGS.eval_report_use_preds else "given")
@@ -95,11 +100,11 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
                     batch_size = pred.size(0)
                     sent1_transitions = transitions_per_example[:batch_size]
                     sent2_transitions = transitions_per_example[batch_size:]
-                    reporter_args.append(sent1_transitions)
-                    reporter_args.append(sent2_transitions)
+                    reporter_args["sent1_transitions"] = sent1_transitions
+                    reporter_args["sent2_transitions"] = sent2_transitions
                 else:
-                    reporter_args.append(transitions_per_example)
-            reporter.save_batch(*reporter_args)
+                    reporter_args["sent1_transitions"] = transitions_per_example
+            reporter.save_batch(reporter_args)
 
         # Print Progress
         progress_bar.step(i+1, total=total_batches)
@@ -120,12 +125,10 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
     if FLAGS.write_eval_report:
         eval_report_path = os.path.join(FLAGS.log_path, FLAGS.experiment_name + ".report")
         reporter.write_report(eval_report_path)
+        logger.Log("Eval Report Written to: {}".format(eval_report_path))
 
     eval_class_acc = stats_args['class_acc']
     eval_trans_acc = stats_args['transition_acc']
-
-    if index == 0:
-        eval_metrics(M, stats_args, step)
 
     return eval_class_acc, eval_trans_acc
 

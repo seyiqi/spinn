@@ -69,17 +69,47 @@ class EvalReporter(object):
     def __init__(self):
         self.batches = []
 
-    def save_batch(self, preds, target, example_ids, output, sent1_transitions=None, sent2_transitions=None):
-        sent1_transitions = sent1_transitions if sent1_transitions is not None else [None] * len(example_ids)
-        sent2_transitions = sent2_transitions if sent2_transitions is not None else [None] * len(example_ids)
-        batch = [preds.view(-1), target.view(-1), example_ids, output, sent1_transitions, sent2_transitions]
+    def save_batch(self, reporter_args):
+
+        preds = reporter_args["preds"].view(-1)
+        target = reporter_args["target"].view(-1)
+        example_ids = reporter_args["example_ids"]
+        output = reporter_args["output"]
+        sent1_transitions = reporter_args.get("sent1_transitions", [None] * len(example_ids))
+        sent2_transitions = reporter_args.get("sent2_transitions", [None] * len(example_ids))
+
+        batch = dict(
+            batch_size=target.size(0),
+            preds=preds,
+            target=target,
+            example_ids=example_ids,
+            output=output,
+            sent1_transitions=sent1_transitions,
+            sent2_transitions=sent2_transitions
+            )
+
         self.batches.append(batch)
 
     def write_report(self, filename):
         with open(filename, 'w') as f:
             for b in self.batches:
-                for bb in zip(*b):
-                    pred, truth, eid, output, sent1_transitions, sent2_transitions = bb
+
+                batch_size = b["batch_size"]
+                preds = b["preds"]
+                target = b["target"]
+                example_ids = b["example_ids"]
+                _output = b["output"]
+                _sent1_transitions = b["sent1_transitions"]
+                _sent2_transitions = b["sent2_transitions"]
+
+                for i in range(batch_size):
+                    pred = preds[i]
+                    truth = target[i]
+                    eid = example_ids[i]
+                    output = _output[i]
+                    sent1_transitions = _sent1_transitions[i]
+                    sent2_transitions = _sent2_transitions[i]
+
                     report_str = "{eid} {correct} {truth} {pred} {output}"
                     if sent1_transitions is not None:
                         report_str += " {sent1_transitions}"
