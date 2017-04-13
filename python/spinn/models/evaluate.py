@@ -87,23 +87,31 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
 
         if FLAGS.write_eval_report:
             reporter_args = dict(
-                preds=pred,
-                target=target,
+                preds=pred.view(-1),
+                target=target.view(-1),
                 example_ids=eval_ids,
-                output=output.data.cpu().numpy()
+                output=output.data.cpu().numpy(),
+                dist=F.softmax(output).data.cpu().numpy(),
                 )
 
             if hasattr(model, 'transition_loss'):
-                transitions_per_example, _ = model.spinn.get_transitions_per_example(
+                transitions_per_example, transitions_strength = model.spinn.get_transitions_per_example(
                     style="preds" if FLAGS.eval_report_use_preds else "given")
                 if model.use_sentence_pair:
                     batch_size = pred.size(0)
                     sent1_transitions = transitions_per_example[:batch_size]
                     sent2_transitions = transitions_per_example[batch_size:]
+                    sent1_strength = transitions_strength[:batch_size]
+                    sent2_strength = transitions_strength[batch_size:]
                     reporter_args["sent1_transitions"] = sent1_transitions
                     reporter_args["sent2_transitions"] = sent2_transitions
+                    reporter_args["sent1_strength"] = sent1_strength
+                    reporter_args["sent2_strength"] = sent2_strength
+                    reporter_args["sent1_transitions_given"] = eval_transitions_batch[:,:,0]
+                    reporter_args["sent2_transitions_given"] = eval_transitions_batch[:,:,1]
                 else:
                     reporter_args["sent1_transitions"] = transitions_per_example
+                    reporter_args["sent1_transitions_given"] = eval_transitions_batch
             reporter.save_batch(reporter_args)
 
         # Print Progress

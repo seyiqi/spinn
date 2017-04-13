@@ -2,6 +2,8 @@ import numpy as np
 from collections import deque
 import os
 
+from spinn.util.sparks import sparks
+
 
 class GenericClass(object):
     def __init__(self, **kwargs):
@@ -71,24 +73,19 @@ class EvalReporter(object):
 
     def save_batch(self, reporter_args):
 
-        preds = reporter_args["preds"].view(-1)
-        target = reporter_args["target"].view(-1)
+        preds = reporter_args["preds"]
+        target = reporter_args["target"]
         example_ids = reporter_args["example_ids"]
-        output = reporter_args["output"]
-        sent1_transitions = reporter_args.get("sent1_transitions", [None] * len(example_ids))
-        sent2_transitions = reporter_args.get("sent2_transitions", [None] * len(example_ids))
 
-        batch = dict(
-            batch_size=target.size(0),
-            preds=preds,
-            target=target,
-            example_ids=example_ids,
-            output=output,
-            sent1_transitions=sent1_transitions,
-            sent2_transitions=sent2_transitions
-            )
+        reporter_args.setdefault("batch_size", target.size(0))
+        reporter_args.setdefault("sent1_transitions", [None] * len(example_ids))
+        reporter_args.setdefault("sent2_transitions", [None] * len(example_ids))
+        reporter_args.setdefault("sent1_strength", [None] * len(example_ids))
+        reporter_args.setdefault("sent2_strength", [None] * len(example_ids))
+        reporter_args.setdefault("sent1_transitions_given", [None] * len(example_ids))
+        reporter_args.setdefault("sent2_transitions_given", [None] * len(example_ids))
 
-        self.batches.append(batch)
+        self.batches.append(reporter_args)
 
     def write_report(self, filename):
         with open(filename, 'w') as f:
@@ -99,32 +96,65 @@ class EvalReporter(object):
                 target = b["target"]
                 example_ids = b["example_ids"]
                 _output = b["output"]
+                _dist = b["dist"]
                 _sent1_transitions = b["sent1_transitions"]
                 _sent2_transitions = b["sent2_transitions"]
+                _sent1_strength = b["sent1_strength"]
+                _sent2_strength = b["sent2_strength"]
+                _sent1_transitions_given = b["sent1_transitions_given"]
+                _sent2_transitions_given = b["sent2_transitions_given"]
 
                 for i in range(batch_size):
+                    filter_skip = lambda t: t != 2
+
                     pred = preds[i]
                     truth = target[i]
                     eid = example_ids[i]
                     output = _output[i]
-                    sent1_transitions = _sent1_transitions[i]
-                    sent2_transitions = _sent2_transitions[i]
+                    dist = _dist[i]
+                    sent1_transitions = filter(filter_skip, _sent1_transitions[i])
+                    sent2_transitions = filter(filter_skip, _sent2_transitions[i])
+                    sent1_transitions_given = filter(filter_skip, _sent1_transitions_given[i])
+                    sent2_transitions_given = filter(filter_skip, _sent2_transitions_given[i])
+                    sent1_strength = _sent1_strength[i][-len(sent1_transitions_given):]
+                    sent2_strength = _sent2_strength[i][-len(sent2_transitions_given):]
 
-                    report_str = "{eid} {correct} {truth} {pred} {output}"
-                    if sent1_transitions is not None:
-                        report_str += " {sent1_transitions}"
-                    if sent2_transitions is not None:
-                        report_str += " {sent2_transitions}"
-                    report_str += "\n"
                     report_dict = {
                         "eid": eid,
                         "correct": truth == pred,
                         "truth": truth,
                         "pred": pred,
                         "output": " ".join([str(o) for o in output]),
+                        "dist": " ".join([str(o) for o in dist]),
                         "sent1_transitions": '{}'.format("".join(str(t) for t in sent1_transitions)) if sent1_transitions is not None else None,
                         "sent2_transitions": '{}'.format("".join(str(t) for t in sent2_transitions)) if sent2_transitions is not None else None,
+                        "sent1_strength": sparks([1] + sent1_strength.tolist())[1:].encode('utf-8') if sent1_strength is not None else None,
+                        "sent2_strength": sparks([1] + sent2_strength.tolist())[1:].encode('utf-8') if sent2_strength is not None else None,
+                        "sent1_transitions_given": '{}'.format("".join(str(t) for t in sent1_transitions_given)) if sent1_transitions_given is not None else None,
+                        "sent2_transitions_given": '{}'.format("".join(str(t) for t in sent2_transitions_given)) if sent2_transitions_given is not None else None,
                     }
+
+                    report_str = "{eid} {correct} {truth} {pred} ({output}) ({dist})"
+
+                    report_str_len = len(report_str.format(**report_dict))
+
+                    if sent1_strength is not None:
+                        report_str += "\n{sent1_strength}"
+                    if sent2_strength is not None:
+                        report_str += " {sent2_strength}"
+
+                    if sent1_transitions is not None:
+                        report_str += "\n{sent1_transitions}"
+                    if sent2_transitions is not None:
+                        report_str += " {sent2_transitions}"
+                        
+                    if sent1_transitions_given is not None:
+                        report_str += "\n{sent1_transitions_given}"
+                    if sent2_transitions_given is not None:
+                        report_str += " {sent2_transitions_given}"
+
+                    report_str += "\n"
+
                     f.write(report_str.format(**report_dict))
 
 
