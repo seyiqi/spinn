@@ -165,6 +165,13 @@ class SPINN(nn.Module):
         self.n_reduces = np.zeros(len(self.bufs), dtype=np.int32)
         self.n_steps = np.zeros(len(self.bufs), dtype=np.int32)
 
+        # Length Arrays.
+        buf_adjust = 1
+        stack_adjust = 2
+
+        self.buf_lens = np.array([len(buf) for buf in self.bufs], dtype=np.int32) - buf_adjust
+        self.stack_lens = np.full(len(self.stacks), 2, dtype=np.int32) - stack_adjust
+
         if hasattr(self, 'tracker'):
             self.tracker.reset_state()
         if not hasattr(example, 'transitions'):
@@ -175,34 +182,25 @@ class SPINN(nn.Module):
                         use_internal_parser=use_internal_parser,
                         validate_transitions=validate_transitions)
 
-    def validate(self, transitions, preds, stacks, bufs, zero_padded=True):
-        # Note: There is one zero added to bufs, and two zeros added to stacks.
-        # Make sure to adjust for this if using lengths of either.
-        buf_adjust = 1 if zero_padded else 0
-        stack_adjust = 2 if zero_padded else 0
+    def validate(self, transitions, preds, stacks, bufs):
 
         _preds = preds.copy()
         _invalid = np.zeros(preds.shape, dtype=np.bool)
 
-        incorrect = 0
         cant_skip = transitions != T_SKIP
         must_skip = transitions == T_SKIP
 
-        # Fixup predicted skips.
-        if len(self.choices) > 2:
-            raise NotImplementedError("Can only validate actions for 2 choices right now.")
-
-        buf_lens = [len(buf) - buf_adjust for buf in bufs]
-        stack_lens = [len(stack) - stack_adjust for stack in stacks]
+        buf_lens = self.buf_lens
+        stack_lens = self.stack_lens
 
         # Cannot reduce on too small a stack
-        must_shift = np.array([length < 2 for length in stack_lens])
+        must_shift = stack_lens < 2
         check_mask = np.logical_and(cant_skip, must_shift)
         _invalid += np.logical_and(_preds != T_SHIFT, check_mask)
         _preds[must_shift] = T_SHIFT
 
         # Cannot shift on too small buf
-        must_reduce = np.array([length < 1 for length in buf_lens])
+        must_reduce = buf_lens < 1
         check_mask = np.logical_and(cant_skip, must_reduce)
         _invalid += np.logical_and(_preds != T_REDUCE, check_mask)
         _preds[must_reduce] = T_REDUCE
@@ -382,6 +380,11 @@ class SPINN(nn.Module):
                     # If this FLAG is set, then use the predicted actions rather than the given.
                     if use_internal_parser:
                         transition_arr = transition_preds
+
+                    # Adjust lengths.
+                    self.buf_lens -= transition_arr == T_SHIFT
+                    self.stack_lens -= transition_arr == T_REDUCE
+                    self.stack_lens += transition_arr == T_SHIFT
 
             # Pre-Action Phase
             # ================
