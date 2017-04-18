@@ -132,8 +132,10 @@ class SPINNTestCase(unittest.TestCase):
             0, 0, 1, 1, 0, 1
             ]).astype(np.int32)
 
+        model.spinn.buf_lens = np.array([len(buf) for buf in bufs], dtype=np.int32)
+        model.spinn.stack_lens = np.array([len(stack) for stack in stacks], dtype=np.int32)
 
-        ret, _ = model.spinn.validate(transitions, preds, stacks, bufs, zero_padded=False)
+        ret, _ = model.spinn.validate(transitions, preds, stacks, bufs)
         expected = np.array([
             2, 1, 0, 0, 0, 1
         ], dtype=np.int32)
