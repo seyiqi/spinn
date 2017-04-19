@@ -266,10 +266,6 @@ class SPINN(nn.Module):
 
         trackings.append(tracking)
 
-    def t_skip(self):
-        """SKIP: Acts as padding and is a noop."""
-        pass
-
     def shift_phase(self, tops, trackings, stacks, idxs):
         """SHIFT: Should dequeue buffer and item to stack."""
         if len(stacks) > 0:
@@ -410,8 +406,6 @@ class SPINN(nn.Module):
                 elif transition == T_REDUCE: # reduce
                     self.t_reduce(buf, stack, tracking, r_lefts, r_rights, r_trackings)
                     r_stacks.append(stack)
-                elif transition == T_SKIP: # skip
-                    self.t_skip()
 
             # Action Phase
             # ============
