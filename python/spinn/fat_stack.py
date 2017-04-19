@@ -304,8 +304,8 @@ class SPINN(nn.Module):
             sub_batch_size = len(transition_arr)
 
             # A mask based on SKIP transitions.
-            cant_skip = np.array(transitions) != T_SKIP
-            must_skip = np.array(transitions) == T_SKIP
+            cant_skip = transitions != T_SKIP
+            must_skip = transitions == T_SKIP
 
             # Memories
             # ========
@@ -330,7 +330,7 @@ class SPINN(nn.Module):
             # Run if:
             # A. We have a tracking component and,
             # B. There is at least one transition that will not be skipped.
-            if hasattr(self, 'tracker') and sum(cant_skip) > 0:
+            if hasattr(self, 'tracker') and cant_skip.sum() > 0:
 
                 # Get hidden output from the tracker. Used to predict transitions.
                 tracker_h, tracker_c = self.tracker(
