@@ -181,13 +181,12 @@ class SPINN(nn.Module):
         buf_adjust = 1 if zero_padded else 0
         stack_adjust = 2 if zero_padded else 0
 
-        _transitions = np.array(transitions)
         _preds = preds.copy()
         _invalid = np.zeros(preds.shape, dtype=np.bool)
 
         incorrect = 0
-        cant_skip = _transitions != T_SKIP
-        must_skip = _transitions == T_SKIP
+        cant_skip = transitions != T_SKIP
+        must_skip = transitions == T_SKIP
 
         # Fixup predicted skips.
         if len(self.choices) > 2:
@@ -300,8 +299,7 @@ class SPINN(nn.Module):
 
         for t_step in range(num_transitions):
             transitions = inp_transitions[:, t_step]
-            transition_arr = list(transitions)
-            sub_batch_size = len(transition_arr)
+            transition_arr = transitions
 
             # A mask based on SKIP transitions.
             cant_skip = transitions != T_SKIP
@@ -383,7 +381,7 @@ class SPINN(nn.Module):
 
                     # If this FLAG is set, then use the predicted actions rather than the given.
                     if use_internal_parser:
-                        transition_arr = transition_preds.tolist()
+                        transition_arr = transition_preds
 
             # Pre-Action Phase
             # ================
@@ -422,10 +420,10 @@ class SPINN(nn.Module):
             self.memories.append(self.memory)
 
             # Update number of reduces seen so far.
-            self.n_reduces += (np.array(transition_arr) == T_REDUCE)
+            self.n_reduces += (transition_arr == T_REDUCE)
 
             # Update number of non-skip actions seen so far.
-            self.n_steps += (np.array(transition_arr) != T_SKIP)
+            self.n_steps += (transition_arr != T_SKIP)
 
         # Loss Phase
         # ==========
