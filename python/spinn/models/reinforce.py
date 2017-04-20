@@ -57,7 +57,6 @@ def evaluate(FLAGS, model, data_manager, eval_set, index, logger, step, vocabula
     progress_bar = SimpleProgressBar(msg="Run Eval", bar_length=60, enabled=FLAGS.show_progress_bar)
     progress_bar.step(0, total=total_batches)
     total_tokens = 0
-    invalid = 0
     start = time.time()
 
     model.eval()

@@ -17,7 +17,6 @@ def train_accumulate(model, data_manager, A, batch):
 
     has_spinn = hasattr(model, 'spinn')
     has_transition_loss = hasattr(model, 'transition_loss') and model.transition_loss is not None
-    has_invalid = has_spinn and hasattr(model.spinn, 'invalid')
 
     # Accumulate stats for transition accuracy.
     if has_transition_loss:
@@ -25,9 +24,6 @@ def train_accumulate(model, data_manager, A, batch):
         truth = [m["t_given"] for m in model.spinn.memories if m.get('t_given', None) is not None]
         A.add('preds', preds)
         A.add('truth', truth)
-
-    if has_invalid:
-        A.add('invalid', model.spinn.invalid)
 
 
 def train_rl_accumulate(model, data_manager, A, batch):
@@ -64,7 +60,6 @@ def train_stats(model, optimizer, A, step):
 
     has_spinn = hasattr(model, 'spinn')
     has_transition_loss = hasattr(model, 'transition_loss') and model.transition_loss is not None
-    has_invalid = has_spinn and hasattr(model.spinn, 'invalid')
     has_policy = has_spinn and hasattr(model, 'policy_loss')
     has_value = has_spinn and hasattr(model, 'value_loss')
     has_epsilon = has_spinn and hasattr(model.spinn, "epsilon")
@@ -83,7 +78,6 @@ def train_stats(model, optimizer, A, step):
         xent_cost=A.get_avg('xent_cost'), # not actual mean
         transition_cost=model.transition_loss.data[0] if has_transition_loss else 0.0,
         l2_cost=A.get_avg('l2_cost'), # not actual mean
-        invalid=A.get_avg('invalid') if has_invalid else 0.0,
         learning_rate=optimizer.lr,
         time=time_metric,
     )
@@ -149,8 +143,6 @@ def train_extra_format(model):
     # Extra Component.
     extra_str = "Train Extra:"
     extra_str += " lr{learning_rate:.7f}"
-    if hasattr(model, "spinn") and hasattr(model.spinn, "invalid"):
-        extra_str += " inv{invalid:.3f}"
 
     return extra_str
 
@@ -175,7 +167,6 @@ def eval_accumulate(model, data_manager, A, batch):
 
     has_spinn = hasattr(model, 'spinn')
     has_transition_loss = hasattr(model, 'transition_loss') and model.transition_loss is not None
-    has_invalid = has_spinn and hasattr(model.spinn, 'invalid')
     has_policy = has_spinn and hasattr(model, 'policy_loss')
     has_value = has_spinn and hasattr(model, 'value_loss')
 
@@ -186,9 +177,6 @@ def eval_accumulate(model, data_manager, A, batch):
         A.add('preds', preds)
         A.add('truth', truth)
 
-    if has_invalid:
-        A.add('invalid', model.spinn.invalid)
-
 
 def eval_format(model):
     eval_str = "Step: {step} Eval acc: {class_acc:.5f} {transition_acc:.5f} {filename} Time: {time:.5f}"
@@ -198,8 +186,6 @@ def eval_format(model):
 
 def eval_extra_format(model):
     extra_str = "Eval Extra:"
-    if hasattr(model, 'spinn'):
-        extra_str += " inv{invalid:.3f}"
 
     return extra_str
 
@@ -218,7 +204,6 @@ def eval_stats(model, A, step):
 
     has_spinn = hasattr(model, 'spinn')
     has_transition_loss = hasattr(model, 'transition_loss') and model.transition_loss is not None
-    has_invalid = has_spinn and hasattr(model.spinn, 'invalid')
     has_policy = has_spinn and hasattr(model, 'policy_loss')
     has_value = has_spinn and hasattr(model, 'value_loss')
     has_epsilon = has_spinn and hasattr(model.spinn, "epsilon")
@@ -242,7 +227,6 @@ def eval_stats(model, A, step):
         # transition_cost=model.transition_loss.data[0] if has_transition_loss else 0.0,
         # policy_cost=model.policy_loss.data[0] if has_policy else 0.0,
         # value_cost=model.value_loss.data[0] if has_value else 0.0,
-        invalid=A.get_avg('invalid') if has_invalid else 0.0,
         # epsilon=model.spinn.epsilon if has_epsilon else 0.0,
         time=time_metric,
     )

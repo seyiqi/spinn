@@ -290,7 +290,6 @@ class SPINN(nn.Module):
         transition_acc = 0.0
         num_transitions = inp_transitions.shape[1]
         batch_size = inp_transitions.shape[0]
-        invalid_count = np.zeros(batch_size)
 
         # Transition Loop
         # ===============
@@ -366,7 +365,6 @@ class SPINN(nn.Module):
 
                     # Keep track of which predictions have been valid.
                     self.memory["t_valid_mask"] = np.logical_not(invalid_mask)
-                    invalid_count += invalid_mask
 
                     # If the given action is skip, then must skip.
                     transition_preds[must_skip] = T_SKIP
@@ -452,9 +450,6 @@ class SPINN(nn.Module):
             select_t_given = to_gpu(Variable(torch.from_numpy(t_given[t_mask]), volatile=not self.training).long())
             select_t_logits = torch.index_select(t_logits, 0, index)
             transition_loss = nn.NLLLoss()(select_t_logits, select_t_given) * self.transition_weight
-
-            self.n_invalid = (invalid_count > 0).sum()
-            self.invalid = self.n_invalid / float(batch_size)
 
         self.loss_phase_hook()
 

@@ -125,9 +125,9 @@ class SPINNTestCase(unittest.TestCase):
             [None, None],
         ]
 
-        transitions = [
+        transitions = np.array([
             2, 1, 0, 0, 0, 1
-            ]
+            ]).astype(np.int32)
         preds = np.array([
             0, 0, 1, 1, 0, 1
             ]).astype(np.int32)
