@@ -274,9 +274,7 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
             train_metrics(M, stats_args, step)
 
             stats_rl_args = train_rl_stats(model, optimizer, A, step)
-            stats_rl_args_keys = ['policy_cost', 'value_cost',
-                'mean_adv_mean', 'mean_adv_mean_magnitude',
-                'mean_adv_var', 'mean_adv_var_magnitude']
+            stats_rl_args_keys = ['policy_cost', 'value_cost']
             for k in stats_rl_args_keys:
                 stats_args[k] = stats_rl_args[k]
 

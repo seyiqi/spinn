@@ -36,11 +36,6 @@ def train_rl_accumulate(model, data_manager, A, batch):
     if has_value:
         A.add('value_cost', model.value_loss.data[0])
 
-    A.add('adv_mean', model.stats['mean'])
-    A.add('adv_mean_magnitude', model.stats['mean_magnitude'])
-    A.add('adv_var', model.stats['var'])
-    A.add('adv_var_magnitude', model.stats['var_magnitude'])
-
 
 def train_metrics(M, stats_args, step):
     metric_stats = ['class_acc', 'total_cost', 'transition_acc', 'transition_cost']
@@ -49,9 +44,7 @@ def train_metrics(M, stats_args, step):
 
 
 def train_rl_metrics(M, stats_args, step):
-    stats_rl_args_keys = ['policy_cost', 'value_cost',
-        'mean_adv_mean', 'mean_adv_mean_magnitude',
-        'mean_adv_var', 'mean_adv_var_magnitude']
+    stats_rl_args_keys = ['policy_cost', 'value_cost']
     for key in stats_rl_args_keys:
         M.write(key, stats_args[key], step)
 
@@ -97,18 +90,9 @@ def train_rl_stats(model, data_manager, A, batch):
     has_policy = hasattr(model, 'policy_loss')
     has_value = hasattr(model, 'value_loss')
 
-    adv_mean = np.array(A.get('adv_mean'), dtype=np.float32)
-    adv_mean_magnitude = np.array(A.get('adv_mean_magnitude'), dtype=np.float32)
-    adv_var = np.array(A.get('adv_var'), dtype=np.float32)
-    adv_var_magnitude = np.array(A.get('adv_var_magnitude'), dtype=np.float32)
-
     ret = dict(
         policy_cost=A.get_avg('policy_cost') if has_policy else 0.0,
         value_cost=A.get_avg('value_cost') if has_value else 0.0,
-        mean_adv_mean=adv_mean.mean(),
-        mean_adv_mean_magnitude=adv_mean_magnitude.mean(),
-        mean_adv_var=adv_var.mean(),
-        mean_adv_var_magnitude=adv_var_magnitude.mean(),
         epsilon=model.spinn.epsilon,
         temperature=model.spinn.temperature,
         )
@@ -151,10 +135,6 @@ def train_rl_format(model):
 
     # Extra Component.
     extra_str = "Train RL:"
-    extra_str += " am{mean_adv_mean:.5f}"
-    extra_str += " amm{mean_adv_mean_magnitude:.5f}"
-    extra_str += " av{mean_adv_var:.5f}"
-    extra_str += " avm{mean_adv_var_magnitude:.5f}"
     extra_str += " t{temperature:.3f}"
     extra_str += " eps{epsilon:.7f}"
 

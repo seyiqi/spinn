@@ -236,13 +236,6 @@ class BaseModel(_BaseModel):
 
         t_index = to_gpu(Variable(torch.from_numpy(np.arange(t_mask.shape[0])[t_mask])).long())
 
-        self.stats = dict(
-            mean=advantage.mean(),
-            mean_magnitude=advantage.abs().mean(),
-            var=advantage.var(),
-            var_magnitude=advantage.abs().var()
-            )
-
         if self.use_sentence_pair:
             # Handles the case of SNLI where each reward is used for two sentences.
             advantage = torch.cat([advantage, advantage], 0)

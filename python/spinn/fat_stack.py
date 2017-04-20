@@ -225,11 +225,16 @@ class SPINN(nn.Module):
         else:
             raise NotImplementedError
 
-        t_preds = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
+        t_preds, t_logits = self.request_memories(['t_preds', 't_logits'])
+
         t_preds = torch.from_numpy(t_preds).long()
-        t_logits = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0).data.cpu()
+        t_logits = t_logits.data.cpu()
         t_logits = torch.cat([t_logits, torch.zeros(t_logits.size(0), 1)], 1)
         t_strength = torch.gather(t_logits, 1, t_preds.view(-1, 1))
+
+        # t_preds = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
+        # t_logits = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0).data.cpu()
+        # t_logits = torch.cat([t_logits, torch.zeros(t_logits.size(0), 1)], 1)
 
         _transitions = [m[source].reshape(1, -1) for m in self.memories if m.get(source, None) is not None]
         transitions = np.concatenate(_transitions).T
@@ -298,9 +303,15 @@ class SPINN(nn.Module):
             elif k == 't_mask':
                 self.preprocessed_memory[k] = np.concatenate([m['t_mask'] for m in self.memories if m.get('t_mask', None) is not None])
             elif k == 't_valid_mask':
-                self.preprocessed_memory[k] = np.concatenate([m['t_valid_mask'] for m in self.memories if m.get('t_mask', None) is not None])
+                # Saved as invalid. Use inverse.
+                mask = np.concatenate([m['t_valid_mask'] for m in self.memories if m.get('t_mask', None) is not None])
+                mask = np.logical_not(mask)
+                self.preprocessed_memory[k] = mask
             elif k == 't_logits':
-                self.preprocessed_memory[k] = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0)
+                # Saved as linear outp. Use log_softmax.
+                outp = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0)
+                outp = F.log_softmax(outp)
+                self.preprocessed_memory[k] = outp
             else:
                 raise NotImplementedError
             ret.append(self.preprocessed_memory[k])
@@ -367,7 +378,7 @@ class SPINN(nn.Module):
                     # ===============
 
                     # Distribution of transitions use to calculate transition loss.
-                    self.memory["t_logits"] = F.log_softmax(transition_output)
+                    self.memory["t_logits"] = transition_output
 
                     # Given transitions.
                     self.memory["t_given"] = transitions
@@ -385,7 +396,7 @@ class SPINN(nn.Module):
                         transition_preds = validated_preds
 
                     # Keep track of which predictions have been valid.
-                    self.memory["t_valid_mask"] = np.logical_not(invalid_mask)
+                    self.memory["t_valid_mask"] = invalid_mask
 
                     # If the given action is skip, then must skip.
                     transition_preds[must_skip] = T_SKIP
