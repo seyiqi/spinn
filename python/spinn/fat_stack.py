@@ -135,6 +135,7 @@ class SPINN(nn.Module):
 
     def reset_state(self):
         self.memories = []
+        self.preprocessed_memory = dict()
 
     def forward(self, example, use_internal_parser=False, validate_transitions=True):
         self.n_tokens = (example.tokens.data != 0).long().sum(1).view(-1).tolist()
@@ -285,6 +286,26 @@ class SPINN(nn.Module):
     def loss_phase_hook(self):
         pass
 
+    def request_memories(self, requests):
+        ret = []
+        for k in requests:
+            if k in self.preprocessed_memory:
+                pass
+            elif k == 't_given':
+                self.preprocessed_memory[k] = np.concatenate([m['t_given'] for m in self.memories if m.get('t_given', None) is not None])
+            elif k == 't_preds':
+                self.preprocessed_memory[k] = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
+            elif k == 't_mask':
+                self.preprocessed_memory[k] = np.concatenate([m['t_mask'] for m in self.memories if m.get('t_mask', None) is not None])
+            elif k == 't_valid_mask':
+                self.preprocessed_memory[k] = np.concatenate([m['t_valid_mask'] for m in self.memories if m.get('t_mask', None) is not None])
+            elif k == 't_logits':
+                self.preprocessed_memory[k] = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0)
+            else:
+                raise NotImplementedError
+            ret.append(self.preprocessed_memory[k])
+        return ret
+
     def run(self, inp_transitions, run_internal_parser=False, use_internal_parser=False, validate_transitions=True):
         transition_loss = None
         transition_acc = 0.0
@@ -430,10 +451,7 @@ class SPINN(nn.Module):
         # ==========
 
         if hasattr(self, 'tracker') and hasattr(self, 'transition_net'):
-            t_preds = np.concatenate([m['t_preds'] for m in self.memories if m.get('t_preds', None) is not None])
-            t_given = np.concatenate([m['t_given'] for m in self.memories if m.get('t_given', None) is not None])
-            t_mask = np.concatenate([m['t_mask'] for m in self.memories if m.get('t_mask', None) is not None])
-            t_logits = torch.cat([m['t_logits'] for m in self.memories if m.get('t_logits', None) is not None], 0)
+            t_preds, t_given, t_mask, t_logits = self.request_memories(['t_preds', 't_given', 't_mask', 't_logits'])
 
             # We compute accuracy and loss after all transitions have complete,
             # since examples can have different lengths when not using skips.

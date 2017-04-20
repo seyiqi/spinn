@@ -222,10 +222,7 @@ class BaseModel(_BaseModel):
 
         # TODO: Many of these ops are on the cpu. Might be worth shifting to GPU.
 
-        t_preds = np.concatenate([m['t_preds'] for m in self.spinn.memories if m.get('t_preds', None) is not None])
-        t_mask = np.concatenate([m['t_mask'] for m in self.spinn.memories if m.get('t_mask', None) is not None])
-        t_valid_mask = np.concatenate([m['t_valid_mask'] for m in self.spinn.memories if m.get('t_mask', None) is not None])
-        t_logits = torch.cat([m['t_logits'] for m in self.spinn.memories if m.get('t_logits', None) is not None], 0)
+        t_preds, t_valid_mask, t_mask, t_logits = self.spinn.request_memories(['t_preds', 't_valid_mask', 't_mask', 't_logits'])
 
         if self.rl_valid:
             t_mask = np.logical_and(t_mask, t_valid_mask)
