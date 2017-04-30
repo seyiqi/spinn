@@ -3,25 +3,48 @@ from collections import deque
 import os
 
 import time
+import psutil
+# import resource
+# import objgraph
 
-TIMER_SCOPE = []
 
-class Timer:
-    def __init__(self, name="timer"):
+PROFILE_SCOPE = []
+
+
+def mem_check_usage():
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss
+
+
+class Profiler:
+    def __init__(self, name="profiler", time=True, memory=False):
         self.name = name
+        self.time = time
+        self.memory = memory
 
     def __enter__(self):
-        global TIMER_SCOPE
-        TIMER_SCOPE.append(self.name)
-        self.start = time.clock()
+        global PROFILE_SCOPE
+        PROFILE_SCOPE.append(self.name)
+        if self.time:
+            self.start = time.clock()
+        if self.memory:
+            self.start_mem = mem_check_usage()
+            # objgraph.show_growth()
         return self
 
     def __exit__(self, *args):
-        global TIMER_SCOPE
-        self.end = time.clock()
-        self.interval = self.end - self.start
-        print("[{}]: {}".format("][".join(TIMER_SCOPE), self.interval))
-        TIMER_SCOPE.pop()
+        global PROFILE_SCOPE
+        if self.time:
+            self.end = time.clock()
+            self.interval = self.end - self.start
+            print("TIMING [{}]: {}".format("][".join(PROFILE_SCOPE), self.interval))
+        if self.memory:
+            # import ipdb; ipdb.set_trace()
+            self.end_mem = mem_check_usage()
+            self.interval_mem = self.end_mem - self.start_mem
+            print("MEMORY [{}]: i{} s{} e{}".format("][".join(PROFILE_SCOPE), self.interval_mem, self.start_mem, self.end_mem))
+            # objgraph.show_growth()
+        PROFILE_SCOPE.pop()
 
 
 class GenericClass(object):

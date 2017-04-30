@@ -8,7 +8,7 @@ import sys
 import numpy as np
 
 
-from spinn.util.misc import Timer
+from spinn.util.misc import Profiler
 
 
 from spinn.data import T_SHIFT, T_REDUCE, T_SKIP
@@ -258,7 +258,7 @@ def MakeTrainingIterator(sources, batch_size, smart_batches=True, use_peano=True
         random.shuffle(order)
 
         while True:
-            with Timer("batch_it"):
+            with Profiler("batch_it"):
                 idx += 1
                 if idx >= num_batches:
                     # Start another epoch.

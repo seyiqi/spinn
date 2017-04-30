@@ -7,7 +7,7 @@ import sys
 import time
 from collections import deque
 
-from spinn.util.misc import Timer
+from spinn.util.misc import Profiler, mem_check_usage
 
 import gflags
 import numpy as np
@@ -174,13 +174,15 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
     progress_bar = SimpleProgressBar(msg="Training", bar_length=60, enabled=FLAGS.show_progress_bar)
     progress_bar.step(i=0, total=FLAGS.statistics_interval_steps)
 
+    mem_check = []
+
     for step in range(step, FLAGS.training_steps):
-        with Timer("train"):
+        with Profiler("train"):
             model.train()
 
             start = time.time()
 
-            with Timer("get_batch"):
+            with Profiler("get_batch"):
                 batch = get_batch(training_data_iter.next())
             X_batch, transitions_batch, y_batch, num_transitions_batch, train_ids = batch
 
@@ -189,14 +191,14 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
             # Reset cached gradients.
             optimizer.zero_grad()
 
-            with Timer("model"):
+            with Profiler("model"):
                 # Run model.
                 output = model(X_batch, transitions_batch, y_batch,
                     use_internal_parser=FLAGS.use_internal_parser,
                     validate_transitions=FLAGS.validate_transitions
                     )
 
-            with Timer("dist"):
+            with Profiler("dist"):
                 # Normalize output.
                 logits = F.log_softmax(output)
 
@@ -205,18 +207,18 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
                 pred = logits.data.max(1)[1].cpu() # get the index of the max log-probability
                 class_acc = pred.eq(target).sum() / float(target.size(0))
 
-            with Timer("loss"):
+            with Profiler("loss"):
                 # Calculate class loss.
                 xent_loss = nn.NLLLoss()(logits, to_gpu(Variable(target, volatile=False)))
 
                 # Optionally calculate transition loss.
                 transition_loss = model.transition_loss if hasattr(model, 'transition_loss') else None
 
-                with Timer("l2"):
+                with Profiler("l2"):
                     # Extract L2 Cost
                     l2_loss = l2_cost(model, FLAGS.l2_lambda) if FLAGS.use_l2_cost else None
 
-                with Timer("combine"):
+                with Profiler("combine"):
                     # Accumulate Total Loss Variable
                     total_loss = 0.0
                     total_loss += xent_loss
@@ -224,15 +226,15 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
                         total_loss += l2_loss
                     if transition_loss is not None and model.optimize_transition_loss:
                         total_loss += transition_loss
-                    with Timer("aux"):
+                    with Profiler("aux"):
                         total_loss += auxiliary_loss(model)
 
             # Backward pass.
-            with Timer("backward"):
+            with Profiler("backward"):
                 total_loss.backward()
 
             # Hard Gradient Clipping
-            with Timer("clip"):
+            with Profiler("clip"):
                 clip = FLAGS.clipping_max_value
                 for p in model.parameters():
                     if p.requires_grad:
@@ -242,7 +244,7 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
             if FLAGS.actively_decay_learning_rate:
                 optimizer.lr = FLAGS.learning_rate * (FLAGS.learning_rate_decay_per_10k_steps ** (step / 10000.0))
 
-            with Timer("update"):
+            with Profiler("update"):
                 # Gradient descent step.
                 optimizer.step()
 
@@ -250,7 +252,7 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
 
             total_time = end - start
 
-            with Timer("accumulate"):
+            with Profiler("accumulate"):
                 train_accumulate(model, data_manager, A, batch)
                 A.add('class_acc', class_acc)
                 A.add('total_tokens', total_tokens)
@@ -322,6 +324,16 @@ def train_loop(FLAGS, data_manager, model, optimizer, trainer, training_data_ite
             trainer.save(standard_checkpoint_path, step, best_dev_error)
 
         progress_bar.step(i=step % FLAGS.statistics_interval_steps, total=FLAGS.statistics_interval_steps)
+
+        # Track cumulative memory usage
+        mem_check.append(mem_check_usage())
+
+    # Print cumulative memory usage
+    mmprev = 0
+    for im, mm in enumerate(mem_check):
+        print(im, mm, mm - mmprev)
+        mmprev = mm
+    print(min(mem_check), max(mem_check), max(mem_check) - min(mem_check))
 
 
 def run(only_forward=False):
