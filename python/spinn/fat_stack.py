@@ -604,17 +604,23 @@ class BaseModel(nn.Module):
 
             with Profiler("embed"):
                 embeds = self.embed(example.tokens)
-            embeds = self.reshape_input(embeds, b, l)
+            with Profiler("reshape_input"):
+                embeds = self.reshape_input(embeds, b, l)
             with Profiler("encode"):
                 embeds = self.encode(embeds)
-            embeds = self.reshape_context(embeds, b, l)
+            with Profiler("reshape_context"):
+                embeds = self.reshape_context(embeds, b, l)
             self.forward_hook(embeds, b, l)
-            embeds = F.dropout(embeds, self.embedding_dropout_rate, training=self.training)
-            embeds = torch.chunk(to_cpu(embeds), b, 0)
+            with Profiler("dropout"):
+                embeds = F.dropout(embeds, self.embedding_dropout_rate, training=self.training)
+            with Profiler("chunk"):
+                embeds = torch.chunk(to_cpu(embeds), b, 0)
 
             # Make Buffers
-            embeds = [torch.chunk(x, l, 0) for x in embeds]
-            buffers = [list(reversed(x)) for x in embeds]
+            with Profiler("chunk embeds"):
+                embeds = [torch.chunk(x, l, 0) for x in embeds]
+            with Profiler("make list"):
+                buffers = [list(reversed(x)) for x in embeds]
 
         example.bufs = buffers
 
