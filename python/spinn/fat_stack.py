@@ -613,14 +613,28 @@ class BaseModel(nn.Module):
             self.forward_hook(embeds, b, l)
             with Profiler("dropout"):
                 embeds = F.dropout(embeds, self.embedding_dropout_rate, training=self.training)
-            with Profiler("chunk"):
-                embeds = torch.chunk(to_cpu(embeds), b, 0)
+
+            with Profiler("alternative"):
+                with Profiler("chunk"):
+                    ee = torch.chunk(embeds, b * l, 0)
+                with Profiler("reverse"):
+                    ee = ee[::-1]
+                with Profiler("make list"):
+                    bb = []
+                    for ii in range(b):
+                        ex = ee[ii*l:(ii+1)*l]
+                        bb.append(ex)
+                with Profiler("reverse"):
+                    bb = bb[::-1]
 
             # Make Buffers
-            with Profiler("chunk embeds"):
-                embeds = [torch.chunk(x, l, 0) for x in embeds]
-            with Profiler("make list"):
-                buffers = [list(reversed(x)) for x in embeds]
+            with Profiler("main"):
+                with Profiler("chunk"):
+                    embeds = torch.chunk(to_cpu(embeds), b, 0)
+                with Profiler("chunk embeds"):
+                    embeds = [torch.chunk(x, l, 0) for x in embeds]
+                with Profiler("make list"):
+                    buffers = [list(reversed(x)) for x in embeds]
 
         example.bufs = buffers
 
